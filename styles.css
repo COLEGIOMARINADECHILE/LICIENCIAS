@@ -319,3 +319,13 @@ body.en-inicio .tabs { display: none; }
 .chip.ipe { background: #e8eefb; color: #24427a; margin-left: 6px; font-size: 10.5px; }
 .btn.danger { color: var(--err); border-color: #f0c9c9; }
 .btn.danger:hover:not(:disabled) { background: #fdeeee; }
+
+/* ===== v8: correo institucional con dominio fijo e invitación ===== */
+.email-dom { display: flex; align-items: stretch; border: 1px solid var(--line, #ddd8cb); border-radius: 8px; overflow: hidden; background: #fff; }
+.email-dom input { border: 0 !important; border-radius: 0; flex: 1; min-width: 0; box-shadow: none !important; }
+.email-dom:focus-within { outline: 2px solid var(--gold); outline-offset: 1px; }
+.email-dom .dom { display: flex; align-items: center; padding: 0 10px; background: #f4f1e8; color: var(--navy); font-weight: 600; font-size: 13px; white-space: nowrap; border-left: 1px solid #e6e1d4; }
+.inv-ok { background: var(--ok-soft); color: var(--ok); padding: 10px 12px; border-radius: 8px; }
+.inv-err { background: var(--warn-soft); color: var(--warn); padding: 10px 12px; border-radius: 8px; }
+.inv-err small { color: #6b5a2a; }
+@media (min-width: 900px) { #view-usuarios .grid2 { grid-template-columns: 1.7fr 1fr; } }

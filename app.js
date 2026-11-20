@@ -72,7 +72,13 @@
     var body = Object.assign({ action: action, token: S.token }, data || {});
     var p = DEMO ? Demo.call(body) : fetch(window.API_URL, {
       method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body)
-    }).then(function (r) { return r.json(); });
+    }).then(function (r) { return r.json(); }).catch(function () {
+      // "Failed to fetch" o respuesta no-JSON: Google devolvió una página de error en vez de datos
+      var e = new Error(/^(enviarInvitacion|solicitarCodigo)$/.test(action)
+        ? 'Google no permitió enviar el correo: falta autorizar el permiso de correo en Apps Script (en el editor ejecute la función "setup" y acepte "Enviar correo electrónico en su nombre").'
+        : 'No se pudo conectar con Apps Script. Revise su conexión a internet e intente de nuevo.');
+      e.red = true; throw e;
+    });
     return p.then(function (j) {
       if (!j.ok) {
         if (j.error === 'SESION_EXPIRADA') { logoutLocal(); throw new Error('Su sesión expiró. Ingrese nuevamente.'); }
@@ -199,16 +205,19 @@
       changePassword: function (d, q, u) { u.cambiarClave = false; u.clave = q.nueva; return true; },
       adminListUsers: function (d) { return d.users; },
       createUser: function (d, q) {
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(q.email || '')) throw new Error('Indique un correo válido: allí se enviará la invitación');
-        var clave = 'Demo' + Math.floor(1000 + Math.random() * 9000);
-        d.users.push({ id: id('u-'), nombre: q.nombre, email: q.email, rol: q.rol, activo: true, cambiarClave: true, clave: clave });
-        return { lista: d.users, enviado: false, email: q.email, clave: clave };
+        var dom = '@' + (window.DOMINIO_CORREO || 'andaliensur.cl');
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(q.email || '') || q.email.slice(-dom.length) !== dom) throw new Error('El correo debe ser institucional: …' + dom);
+        if (d.users.some(function (x) { return x.email === q.email; })) throw new Error('Ya existe un usuario con ese correo');
+        var clave = 'Demo' + Math.floor(1000 + Math.random() * 9000), nu = { id: id('u-'), nombre: q.nombre, email: q.email, rol: q.rol, activo: true, cambiarClave: true, clave: clave };
+        d.users.push(nu);
+        return { lista: d.users, id: nu.id, email: q.email, clave: clave };
       },
       reenviarInvitacion: function (d, q) {
         var u = d.users.filter(function (x) { return x.id === q.id; })[0], clave = 'Demo' + Math.floor(1000 + Math.random() * 9000);
         u.cambiarClave = true; u.clave = clave;
-        return { lista: d.users, enviado: false, email: u.email, clave: clave };
+        return { lista: d.users, id: u.id, email: u.email, clave: clave };
       },
+      enviarInvitacion: function () { return { enviado: false }; },
       solicitarCodigo: function (d, q) {
         var u = d.users.filter(function (x) { return x.id === q.userId; })[0];
         if (!u) throw new Error('Seleccione su nombre');
@@ -310,7 +319,7 @@
     confirmDlg('Recuperar clave', 'Enviaremos un <b>código de 6 dígitos</b> al correo registrado de <b>' + esc(u.nombre) + '</b> para que cree una nueva clave.').then(function (ok) {
       if (!ok) return;
       busy(true, 'Enviando código…');
-      api('solicitarCodigo', { userId: uid }).then(function (r) {
+      api('solicitarCodigo', { userId: uid, pageUrl: location.origin + location.pathname }).then(function (r) {
         busy(false);
         if (r.demoCodigo) toast('Modo demostración: el código es ' + r.demoCodigo);
         return pedirCodigo(uid, r.correo);
@@ -1361,20 +1370,41 @@
     }).join('');
   }
   function paginaUrl() { return location.origin + location.pathname; }
-  // Resultado de una invitación: confirma el envío o, si el correo no salió, muestra la clave UNA vez para entregarla en persona
-  function avisoInvitacion(r, nombre) {
+  var DOMINIO = window.DOMINIO_CORREO || 'andaliensur.cl';
+  $$('.email-dom .dom').forEach(function (s) { s.textContent = '@' + DOMINIO; });
+  // "juan.perez" -> "juan.perez@andaliensur.cl" (si pegan el correo completo, se respeta)
+  function correoCompleto(v) { v = String(v || '').trim().toLowerCase().replace(/\s+/g, ''); return !v ? '' : v.indexOf('@') < 0 ? v + '@' + DOMINIO : v; }
+  $('#userForm').elements.email.addEventListener('input', function () {
+    var i = this.value.indexOf('@'); if (i >= 0 && this.value.slice(i + 1).toLowerCase() === DOMINIO) this.value = this.value.slice(0, i);
+  });
+
+  /* Invitación en 2 pasos: (1) se crea el usuario con clave automática; (2) se envía el correo.
+     Si el correo falla, el usuario ya existe y el administrador ve la clave para entregarla en persona. */
+  function invitar(r, nombre) {
     renderUsers(r.lista);
-    if (r.enviado) return openDlg('Invitación enviada', '<p>Se envió a <b>' + esc(r.email) + '</b> una clave provisoria para <b>' + esc(nombre) +
-      '</b>. Al ingresar, la página le pedirá crear su clave personal.</p><p class="muted small">Si no lo ve, pídale revisar la carpeta de spam.</p>');
-    return openDlg('Entregue esta clave provisoria', '<p>' + (DEMO ? 'En modo demostración no se envían correos.' : 'No se pudo enviar el correo a <b>' + esc(r.email) + '</b>.') +
-      ' Entregue esta clave a <b>' + esc(nombre) + '</b>; deberá cambiarla al ingresar:</p><p class="temp-pass">' + esc(r.clave) + '</p>' +
-      '<p class="muted small">Por seguridad no se volverá a mostrar.</p>');
+    busy(true, 'Enviando invitación a ' + r.email + '…');
+    return api('enviarInvitacion', { id: r.id, pageUrl: paginaUrl() }).then(function (s) {
+      busy(false); mostrarInvitacion(r, nombre, s.enviado ? '' : 'demo');
+    }, function (e) {
+      busy(false); mostrarInvitacion(r, nombre, e.message);
+    });
+  }
+  function mostrarInvitacion(r, nombre, error) {
+    var ok = !error;
+    var cab = ok ? '<p class="inv-ok">✓ Se envió la invitación a <b>' + esc(r.email) + '</b>, con la clave provisoria y la dirección de la página.</p>'
+      : error === 'demo' ? '<p>Modo demostración: no se envían correos.</p>'
+      : '<p class="inv-err">El usuario quedó creado, pero <b>no se pudo enviar el correo</b>.<br><small>' + esc(error) + '</small></p>';
+    openDlg(ok ? 'Invitación enviada' : 'Usuario creado', cab +
+      '<p>Clave provisoria de <b>' + esc(nombre) + '</b> (creada automáticamente):</p><p class="temp-pass">' + esc(r.clave) + '</p>' +
+      '<p class="muted small">Página: <a href="' + esc(paginaUrl()) + '" target="_blank" rel="noopener">' + esc(paginaUrl()) + '</a><br>' +
+      (ok ? 'Si no le llega, pídale revisar la carpeta de spam.' : 'Entréguele la clave y la dirección; cuando el correo funcione puede usar "Enviar clave provisoria".') +
+      ' Al ingresar deberá crear su clave personal.</p>');
   }
   $('#userForm').addEventListener('submit', function (e) {
-    e.preventDefault(); var f = e.target, nombre = f.nombre.value.trim();
-    busy(true, 'Creando usuario y enviando invitación…');
-    api('createUser', { nombre: nombre, email: f.email.value.trim(), rol: f.rol.value, pageUrl: paginaUrl() })
-      .then(function (r) { f.reset(); busy(false); return avisoInvitacion(r, nombre); })
+    e.preventDefault(); var f = e.target, nombre = f.nombre.value.replace(/\s+/g, ' ').trim();
+    busy(true, 'Creando usuario…');
+    api('createUser', { nombre: nombre, email: correoCompleto(f.email.value), rol: f.rol.value, pageUrl: paginaUrl() })
+      .then(function (r) { f.reset(); return invitar(r, nombre); })
       .catch(function (err) { toast(err.message, true); }).then(function () { busy(false); });
   });
   $('#userTable tbody').addEventListener('click', function (e) {
@@ -1385,16 +1415,16 @@
       return confirmDlg('Enviar clave provisoria', 'Se generará una <b>nueva clave provisoria</b> para <b>' + esc(u.nombre) + '</b> y se enviará a <b>' + esc(u.email || '(sin correo)') +
         '</b>. Su clave actual dejará de funcionar.').then(function (ok) {
         if (!ok) return;
-        busy(true, 'Enviando…');
-        api('reenviarInvitacion', { id: u.id, pageUrl: paginaUrl() }).then(function (r) { busy(false); return avisoInvitacion(r, u.nombre); })
+        busy(true, 'Generando clave provisoria…');
+        api('reenviarInvitacion', { id: u.id, pageUrl: paginaUrl() }).then(function (r) { return invitar(r, u.nombre); })
           .catch(function (err) { toast(err.message, true); }).then(function () { busy(false); });
       });
     }
     if (b.dataset.act === 'edit') p = formDlg('Editar usuario', [
       { name: 'nombre', label: 'Nombre completo', value: u.nombre, required: true },
-      { name: 'email', label: 'Correo', type: 'email', value: u.email },
+      { name: 'email', label: 'Correo (se completa con @' + DOMINIO + ')', value: String(u.email || '').replace('@' + DOMINIO, '') },
       { name: 'rol', label: 'Rol', type: 'select', value: u.rol, options: [['usuario', 'Usuario'], ['admin', 'Administrador']] }
-    ]).then(function (v) { return v && api('updateUser', { id: u.id, nombre: v.nombre, email: v.email, rol: v.rol }); });
+    ]).then(function (v) { return v && api('updateUser', { id: u.id, nombre: v.nombre, email: correoCompleto(v.email), rol: v.rol }); });
     else if (b.dataset.act === 'toggle') p = api('updateUser', { id: u.id, activo: !u.activo });
     else p = confirmDlg('Eliminar usuario', '¿Eliminar a <b>' + esc(u.nombre) + '</b>?').then(function (ok) { return ok && api('deleteUser', { id: u.id }); });
     p.then(function (l) { if (l) { renderUsers(l); toast('Cambios guardados'); } }).catch(function (err) { toast(err.message, true); });

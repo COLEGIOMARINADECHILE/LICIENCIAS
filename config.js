@@ -7,6 +7,9 @@ window.API_URL = 'https://script.google.com/macros/s/AKfycbyH1SWH1W2CVqH5uOzKuVb
 /* Nombre que aparece en la portada */
 window.COLEGIO_NOMBRE = 'Colegio Marina de Chile';
 
+/* Dominio del correo institucional: al crear un usuario solo se escribe lo que va antes de la @ */
+window.DOMINIO_CORREO = 'andaliensur.cl';
+
 window.LICENCIA_ASSETS = {
   escudo: 'escudo-chile.png',   // Escudo de la República de Chile (centro) — FIJO, no se puede cambiar
   colegio: 'logo-70-anios.png', // Insignia por defecto (izquierda y marca de agua central)

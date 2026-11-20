@@ -1,0 +1,20 @@
+GITHUB (página web) — subir TODOS los archivos de esta carpeta
+===============================================================
+
+Archivos de código:  index.html, app.js, licencia.js, styles.css, config.js
+Imágenes:            escudo-chile.png, escudo-chile.svg, logo-70-anios.png, insignia-color.jpg, logo-colegio.png
+Plantilla:           plantilla_estudiantes.csv
+
+config.js ya tiene su URL de Apps Script.
+
+Pasos (desde el navegador, sin programas):
+1. En GitHub: New repository > nombre "licencias" > Create repository.
+2. "uploading an existing file" > arrastre TODOS los archivos de esta carpeta
+   (no la carpeta, sus archivos) > Commit changes.
+3. Settings > Pages > Source: "Deploy from a branch" > Branch: main, carpeta "/ (root)" > Save.
+4. Espere 1–2 minutos. La página quedará en: https://SU-USUARIO.github.io/licencias/
+
+Para actualizar más adelante: "Add file > Upload files", suba el archivo cambiado y confirme;
+GitHub reemplaza el anterior.
+
+Este archivo INSTRUCCIONES.txt no es necesario subirlo.

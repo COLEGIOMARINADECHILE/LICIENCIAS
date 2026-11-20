@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Generador de Licencias</title>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Cormorant+Garamond:ital,wght@1,600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<section id="login" class="login hidden">
+  <form class="login-card" id="loginForm" autocomplete="on">
+    <div class="seal">L</div>
+    <h1>Generador de Licencias</h1>
+    <p class="muted">4° Medio y 8° Básico</p>
+    <label>Usuario
+      <select id="loginUser" required><option value="">Cargando…</option></select>
+    </label>
+    <label>Clave
+      <input id="loginPass" type="password" required autocomplete="current-password">
+    </label>
+    <button class="btn primary block" type="submit">Ingresar</button>
+    <p class="error" id="loginError"></p>
+    <p class="demo-note hidden" id="demoNote">Modo demostración: los datos se guardan solo en este navegador y se acepta cualquier clave. Configure <code>config.js</code> para usar Apps Script.</p>
+  </form>
+</section>
+
+<!-- ============ APP ============ -->
+<section id="app" class="hidden">
+  <header class="topbar">
+    <div class="brand"><span class="seal sm">L</span><div><b>Licencias</b><small id="brandSchool">—</small></div></div>
+    <nav class="tabs" id="tabs">
+      <button data-view="emitir" class="active">Emitir</button>
+      <button data-view="archivo">Archivo</button>
+      <button data-view="colegio">Datos del colegio</button>
+      <button data-view="usuarios" class="admin-only">Usuarios</button>
+    </nav>
+    <div class="me">
+      <span id="meName"></span>
+      <button class="btn ghost sm" id="btnPass">Cambiar clave</button>
+      <button class="btn ghost sm" id="btnLogout">Salir</button>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <!-- ---------- EMITIR ---------- -->
+    <div class="view" id="view-emitir">
+      <div class="toolbar">
+        <div class="seg" data-bind="nivel">
+          <button data-v="4M" class="on">4° Medio</button><button data-v="8B">8° Básico</button>
+        </div>
+        <label class="inline">Año <input type="number" id="anio" min="2000" max="2100"></label>
+        <span class="spacer"></span>
+        <span class="muted" id="cfgHint"></span>
+      </div>
+
+      <div class="grid2">
+        <div class="card">
+          <h3>1. Cargar base de datos</h3>
+          <p class="muted">Excel (.xlsx) o CSV con columnas <b>nombre</b> y <b>run</b>. Opcionales: <b>sexo</b> (F/M) y <b>registro</b>. <a href="plantilla_estudiantes.csv" download>Descargar plantilla</a></p>
+          <div class="drop" id="drop">
+            <input type="file" id="file" accept=".xlsx,.xls,.csv">
+            <span>Arrastre el archivo aquí o <u>haga clic para elegirlo</u></span>
+          </div>
+          <div id="importPreview" class="hidden">
+            <p id="importInfo"></p>
+            <div class="row"><button class="btn primary" id="btnImport">Importar estudiantes</button><button class="btn ghost" id="btnCancelImport">Cancelar</button></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Agregar un estudiante</h3>
+          <form id="addForm" class="form-grid">
+            <label class="span2">Nombre completo<input name="nombre" required></label>
+            <label>R.U.N.<input name="run" placeholder="12.345.678-9" required></label>
+            <label>Trato
+              <select name="sexo"><option value="">Don(a)</option><option value="F">Doña</option><option value="M">Don</option></select>
+            </label>
+            <label>N° de registro<input name="registro" inputmode="numeric"></label>
+            <div class="end"><button class="btn" type="submit">Agregar</button></div>
+          </form>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h3>2. N° de registro por estudiante <span class="count" id="studCount"></span></h3>
+          <div class="row">
+            <label class="inline">Numerar vacíos desde <input type="number" id="autoFrom" min="1" style="width:80px"></label>
+            <button class="btn ghost sm" id="btnAuto">Aplicar</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="tbl" id="studTable">
+            <thead><tr><th><input type="checkbox" id="chkAll"></th><th>Nombre</th><th>R.U.N.</th><th style="width:120px">N° registro</th><th>Estado</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <p class="empty hidden" id="studEmpty">Aún no hay estudiantes para este curso y año. Cargue una base de datos o agréguelos uno por uno.</p>
+        </div>
+      </div>
+
+      <div class="actionbar">
+        <span id="selInfo">0 seleccionados</span>
+        <button class="btn ghost" id="btnPreview">Vista previa</button>
+        <button class="btn primary" id="btnEmitir">3. Generar PDF y guardar</button>
+      </div>
+    </div>
+
+    <!-- ---------- ARCHIVO ---------- -->
+    <div class="view hidden" id="view-archivo">
+      <div class="toolbar">
+        <div class="seg" data-bind="archNivel">
+          <button data-v="4M" class="on">4° Medio</button><button data-v="8B">8° Básico</button>
+        </div>
+        <label class="inline">Año <input type="number" id="archAnio" min="2000" max="2100"></label>
+        <input type="search" id="archSearch" placeholder="Buscar por nombre, RUN o registro">
+        <span class="spacer"></span>
+        <button class="btn primary" id="btnArchAll">Descargar todas (PDF)</button>
+      </div>
+      <div class="card">
+        <div class="table-wrap">
+          <table class="tbl" id="archTable">
+            <thead><tr><th>N° reg.</th><th>Nombre</th><th>R.U.N.</th><th>Emitida</th><th>Por</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <p class="empty hidden" id="archEmpty">No hay licencias guardadas para este curso y año.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------- COLEGIO ---------- -->
+    <div class="view hidden" id="view-colegio">
+      <form id="cfgForm" class="card">
+        <h3>Datos fijos del establecimiento</h3>
+        <p class="muted">Se ingresan una sola vez y aparecen en todas las licencias.</p>
+        <div class="form-grid three">
+          <label class="span2">Nombre del establecimiento<input name="colegio" required placeholder="Colegio …"></label>
+          <label>RBD (Rol Base de Datos)<input name="rbd" required placeholder="1234-5"></label>
+          <label>Región<input name="region" required></label>
+          <label>Provincia<input name="provincia" required></label>
+          <label>Comuna<input name="comuna" required></label>
+          <label>Año escolar<input name="anioEscolar" required inputmode="numeric"></label>
+        </div>
+        <h3 class="mt">Firma</h3>
+        <div class="form-grid three">
+          <label class="span2">Nombre completo de la directora o director<input name="directora" required></label>
+          <label>Cargo (bajo la firma)<input name="cargo" placeholder="Directora del Establecimiento"></label>
+        </div>
+        <h3 class="mt">Fecha de impresión</h3>
+        <p class="muted">Todas las licencias saldrán con este lugar y fecha, sin importar el día en que se descarguen.</p>
+        <div class="form-grid three">
+          <label>Lugar (ciudad o comuna)<input name="ciudad" required></label>
+          <label>Fecha<input name="fecha" type="date" required></label>
+          <label class="check"><input type="checkbox" name="borde" checked> Imprimir marco decorativo <small>(desmarque si la opalina ya trae borde)</small></label>
+        </div>
+        <h3 class="mt">Ajuste de impresión</h3>
+        <p class="muted">Si la licencia sale corrida en la hoja, imprima la <b>hoja de prueba</b>, mida y corrija aquí (en milímetros). Se aplica a todas las licencias, también al volver a descargarlas.</p>
+        <div class="form-grid three">
+          <label>Horizontal (mm) <small class="muted">+ derecha / − izquierda</small><input name="ajusteX" type="number" step="0.5" min="-15" max="15" value="0"></label>
+          <label>Vertical (mm) <small class="muted">+ abajo / − arriba</small><input name="ajusteY" type="number" step="0.5" min="-15" max="15" value="0"></label>
+          <div class="end"><button type="button" class="btn" id="btnPrueba">Descargar hoja de prueba</button></div>
+        </div>
+        <h3 class="mt">Insignia del colegio</h3>
+        <p class="muted">Va arriba a la izquierda y como marca de agua al centro. Elija una o suba otra (PNG o JPG, ideal 1500 px o más). El escudo de la República de Chile es fijo.</p>
+        <div class="insignias" id="insignias"></div>
+        <div class="row mt">
+          <label class="btn" style="flex-direction:row;cursor:pointer">Subir otra insignia<input type="file" accept="image/png,image/jpeg" data-logo="colegio" hidden></label>
+          <span class="muted" style="font-size:12px">Escudo de Chile: fijo, en alta resolución.</span>
+        </div>
+        <div class="row end mt">
+          <button type="button" class="btn ghost" id="btnCfgPreview">Vista previa</button>
+          <button class="btn primary" type="submit">Guardar datos</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- ---------- USUARIOS ---------- -->
+    <div class="view hidden" id="view-usuarios">
+      <div class="grid2">
+        <div class="card">
+          <h3>Usuarios</h3>
+          <div class="table-wrap">
+            <table class="tbl" id="userTable">
+              <thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Activo</th><th></th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <form class="card" id="userForm">
+          <h3>Nuevo usuario</h3>
+          <p class="muted">Aparecerá en la lista de la pantalla de ingreso.</p>
+          <div class="form-grid">
+            <label class="span2">Nombre completo<input name="nombre" required></label>
+            <label class="span2">Correo<input name="email" type="email"></label>
+            <label>Clave inicial<input name="password" type="password" minlength="8" required></label>
+            <label>Rol<select name="rol"><option value="usuario">Usuario</option><option value="admin">Administrador</option></select></label>
+          </div>
+          <div class="row end mt"><button class="btn primary" type="submit">Crear usuario</button></div>
+        </form>
+      </div>
+    </div>
+  </main>
+</section>
+
+<!-- ============ DIÁLOGO ============ -->
+<dialog id="dlg">
+  <form method="dialog" id="dlgForm">
+    <h3 id="dlgTitle"></h3>
+    <div id="dlgBody"></div>
+    <div class="row end mt">
+      <button class="btn ghost" value="cancel" formnovalidate>Cancelar</button>
+      <button class="btn primary" value="ok" id="dlgOk">Aceptar</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast"></div>
+<div id="busy" class="hidden"><div class="spinner"></div><span id="busyText">Procesando…</span></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="config.js"></script>
+<script src="licencia.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

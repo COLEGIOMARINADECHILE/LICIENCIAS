@@ -77,6 +77,8 @@ label.check small { color: var(--muted); font-weight: 400; }
   .login-card { margin: -18px auto 32px; width: calc(100% - 32px); position: relative; }
 }
 
+.ver { margin: 0; text-align: center; font-size: 11.5px; color: var(--muted); }
+
 /* vista previa de importación */
 .imp-head { line-height: 1.6; }
 .mt-s { margin-top: 10px; }

@@ -408,8 +408,16 @@
   ['dragleave', 'drop'].forEach(function (ev) { drop.addEventListener(ev, function () { drop.classList.remove('over'); }); });
   $('#file').addEventListener('change', function () { if (this.files[0]) parseFile(this.files[0]); this.value = ''; });
 
+  // Detecta PDF por su contenido (los PDF empiezan con "%PDF"), aunque el nombre no termine en .pdf
   function parseFile(file) {
-    if (/\.pdf$/i.test(file.name) || file.type === 'application/pdf') {
+    file.slice(0, 5).arrayBuffer().then(function (b) {
+      var head = String.fromCharCode.apply(null, new Uint8Array(b));
+      parseFileTipo(file, head.indexOf('%PDF') === 0 || /\.pdf$/i.test(file.name) || file.type === 'application/pdf');
+    }).catch(function () { parseFileTipo(file, /\.pdf$/i.test(file.name)); });
+  }
+
+  function parseFileTipo(file, esPdf) {
+    if (esPdf) {
       busy(true, 'Leyendo la nómina PDF…');
       file.arrayBuffer().then(parsePdf).then(function (r) {
         if (!r.students.length) throw new Error('No se encontraron estudiantes en el PDF. ¿Es la "Nómina de Alumnos Licenciados" del Mineduc?');
@@ -425,7 +433,7 @@
     p.then(function (wb) {
       var rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '', raw: false });
       var out = mapRows(rows);
-      if (!out.length) throw new Error('No se encontraron estudiantes. Revise que exista una columna "nombre".');
+      if (!out.length) throw new Error('No se encontraron estudiantes en el Excel/CSV. Revise que exista una columna "nombre" (o suba la nómina en PDF).');
       showPreview(out, file.name, null);
     }).catch(function (e) { toast(e.message || 'No se pudo leer el archivo', true); });
   }

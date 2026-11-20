@@ -9,7 +9,7 @@
   var S = {
     token: ss('get', 'lic_token'), user: null, config: {}, assets: null,
     nivel: '4M', anio: YEAR, students: [], selected: {},
-    archNivel: '4M', archAnio: YEAR, licencias: [], pendingImport: null
+    licencias: [], pendingImport: null
   };
 
   var $ = function (s, r) { return (r || document).querySelector(s); };
@@ -129,6 +129,9 @@
         return d.lic.filter(function (l) { return l.nivel === q.nivel && l.anio === String(q.anio); })
           .sort(function (a, b) { return (Number(a.registro) || 0) - (Number(b.registro) || 0); });
       },
+      marcarImpresa: function (d, q) {
+        d.lic.forEach(function (l) { if ((q.ids || []).indexOf(l.id) >= 0) l.impresa = !!q.impresa; }); return true;
+      },
       deleteLicencia: function (d, q) { d.lic = d.lic.filter(function (l) { return l.id !== q.id; }); return true; },
       changePassword: function () { return true; },
       adminListUsers: function (d) { return d.users; },
@@ -185,31 +188,51 @@
     document.body.classList.toggle('is-admin', user.rol === 'admin');
     $('#meName').textContent = user.nombre;
     $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
-    $('#anio').value = S.anio; $('#archAnio').value = S.archAnio;
+    $('#anio').value = S.anio;
+    aplicarCurso();
     return loadConfig().then(loadStudents);
   }
 
   /* ---------------- navegación ---------------- */
+  S.view = 'emitir'; S.archFiltro = 'todas';
   $('#tabs').addEventListener('click', function (e) {
     var b = e.target.closest('button[data-view]'); if (!b) return;
+    S.view = b.dataset.view;
     $$('#tabs button').forEach(function (x) { x.classList.toggle('active', x === b); });
-    $$('.view').forEach(function (v) { v.classList.toggle('hidden', v.id !== 'view-' + b.dataset.view); });
-    $('.actionbar').classList.toggle('hidden', b.dataset.view !== 'emitir');
-    if (b.dataset.view === 'archivo') loadArchivo();
-    if (b.dataset.view === 'usuarios') loadUsersAdmin();
-    if (b.dataset.view === 'colegio') fillConfigForm();
+    $$('.view').forEach(function (v) { v.classList.toggle('hidden', v.id !== 'view-' + S.view); });
+    $('.actionbar').classList.toggle('hidden', S.view !== 'emitir');
+    // el curso activo solo aplica a Emitir y Archivo
+    $('#coursebar').classList.toggle('hidden', S.view !== 'emitir' && S.view !== 'archivo');
+    if (S.view === 'archivo') loadArchivo();
+    if (S.view === 'usuarios') loadUsersAdmin();
+    if (S.view === 'colegio') fillConfigForm();
   });
 
   $$('.seg').forEach(function (seg) {
     seg.addEventListener('click', function (e) {
       var b = e.target.closest('button'); if (!b) return;
+      if (seg.dataset.bind === 'nivel') return setNivel(b.dataset.v);
       $$('button', seg).forEach(function (x) { x.classList.toggle('on', x === b); });
-      if (seg.dataset.bind === 'nivel') { S.nivel = b.dataset.v; loadStudents(); }
-      else { S.archNivel = b.dataset.v; loadArchivo(); }
+      if (seg.dataset.bind === 'archFiltro') { S.archFiltro = b.dataset.v; renderArchivo(); }
     });
   });
-  $('#anio').addEventListener('change', function () { S.anio = this.value; loadStudents(); });
-  $('#archAnio').addEventListener('change', function () { S.archAnio = this.value; loadArchivo(); });
+  $('#anio').addEventListener('change', function () { S.anio = this.value; recargarCurso(); });
+
+  /* Curso activo: cambia el color de toda la página y muestra solo los datos de ese curso */
+  function aplicarCurso() {
+    document.body.classList.toggle('curso-8B', S.nivel === '8B');
+    document.body.classList.toggle('curso-4M', S.nivel !== '8B');
+    $$('.seg[data-bind="nivel"] button').forEach(function (b) { b.classList.toggle('on', b.dataset.v === S.nivel); });
+    $('#courseBadge').innerHTML = S.nivel === '8B' ? '8°<small>Básico</small>' : '4°<small>Medio</small>';
+    $('#courseName').textContent = Licencia.NIVELES[S.nivel].curso + ' · ' + S.anio;
+  }
+  function recargarCurso() {
+    S.selected = {}; S.licencias = []; S.pendingImport = null;
+    $('#importPreview').classList.add('hidden');
+    aplicarCurso();
+    loadStudents();
+    if (S.view === 'archivo') loadArchivo();
+  }
 
   /* ---------------- configuración del colegio ---------------- */
   function loadConfig() {
@@ -299,8 +322,13 @@
   /* ---------------- estudiantes ---------------- */
   function loadStudents() {
     S.selected = {};
-    return api('listStudents', { nivel: S.nivel, anio: S.anio }).then(function (l) { S.students = l; renderStudents(); })
-      .catch(function (e) { toast(e.message, true); });
+    var nivel = S.nivel, anio = S.anio;
+    if (!S.students.length || S.students[0].nivel !== nivel) { S.students = []; renderStudents(); } // no mostrar datos del otro curso
+    return api('listStudents', { nivel: nivel, anio: anio }).then(function (l) {
+      if (nivel !== S.nivel || anio !== S.anio) return; // respuesta tardía de otro curso
+      S.students = l; renderStudents();
+      if (S.view === 'archivo') renderArchivo();
+    }).catch(function (e) { toast(e.message, true); });
   }
 
   function renderStudents() {
@@ -422,7 +450,7 @@
       file.arrayBuffer().then(parsePdf).then(function (r) {
         if (!r.students.length) throw new Error('No se encontraron estudiantes en el PDF. ¿Es la "Nómina de Alumnos Licenciados" del Mineduc?');
         if (r.meta.nivel && r.meta.nivel !== S.nivel) setNivel(r.meta.nivel);
-        if (r.meta.anio && r.meta.anio !== S.anio) { S.anio = r.meta.anio; $('#anio').value = S.anio; loadStudents(); }
+        if (r.meta.anio && r.meta.anio !== S.anio) { S.anio = r.meta.anio; $('#anio').value = S.anio; recargarCurso(); }
         showPreview(r.students, file.name, r.meta);
       }).catch(function (e) { toast(e.message || 'No se pudo leer el PDF', true); }).then(function () { busy(false); });
       return;
@@ -439,9 +467,9 @@
   }
 
   function setNivel(n) {
+    if (n === S.nivel) return;
     S.nivel = n;
-    $$('.seg[data-bind="nivel"] button').forEach(function (b) { b.classList.toggle('on', b.dataset.v === n); });
-    loadStudents();
+    recargarCurso();
   }
 
   /* Vista previa: cantidad, curso, N° de registro inicial y datos del colegio detectados */
@@ -663,24 +691,71 @@
 
   /* ---------------- archivo ---------------- */
   function loadArchivo() {
-    return api('listLicencias', { nivel: S.archNivel, anio: S.archAnio }).then(function (l) { S.licencias = l; renderArchivo(); })
-      .catch(function (e) { toast(e.message, true); });
+    var nivel = S.nivel, anio = S.anio;
+    return api('listLicencias', { nivel: nivel, anio: anio }).then(function (l) {
+      if (nivel !== S.nivel || anio !== S.anio) return; // llegó tarde de otro curso
+      S.licencias = l; renderArchivo();
+    }).catch(function (e) { toast(e.message, true); });
   }
+  function esImpresa(l) { return l.impresa === true || l.impresa === 'TRUE' || l.impresa === 'true'; }
   function filteredLic() {
-    var q = norm($('#archSearch').value);
-    return S.licencias.filter(function (l) { return !q || norm(l.nombre + l.run + l.registro).indexOf(q) >= 0; });
+    var q = norm($('#archSearch').value), f = S.archFiltro;
+    return S.licencias.filter(function (l) {
+      if (f === 'imp' && !esImpresa(l)) return false;
+      if (f === 'pend' && esImpresa(l)) return false;
+      return !q || norm(l.nombre + l.run + l.registro).indexOf(q) >= 0;
+    });
   }
   function renderArchivo() {
     var list = filteredLic();
+    var tot = S.licencias.length, imp = S.licencias.filter(esImpresa).length, est = S.students.length;
+    $('#archStats').innerHTML =
+      '<div class="stat"><b>' + est + '</b><span>estudiantes</span></div>' +
+      '<div class="stat"><b>' + tot + '</b><span>licencias emitidas</span></div>' +
+      '<div class="stat ok"><b>' + imp + '</b><span>impresas</span></div>' +
+      '<div class="stat warn"><b>' + (tot - imp) + '</b><span>por imprimir</span></div>' +
+      '<div class="stat-bar"><i style="width:' + (tot ? Math.round(imp * 100 / tot) : 0) + '%"></i></div>' +
+      (list.length ? '<div class="stat-actions"><button class="link" id="btnMarcarTodas">Marcar las ' + list.length + ' mostradas como impresas</button>' +
+        '<button class="link" id="btnDesmarcarTodas">Desmarcar</button></div>' : '');
     $('#archTable tbody').innerHTML = list.map(function (l) {
-      return '<tr data-id="' + esc(l.id) + '"><td><b>' + esc(l.registro) + '</b></td><td class="name">' + esc(l.nombre) + '</td><td>' + esc(runFormat(l.run)) +
+      var ok = esImpresa(l);
+      return '<tr data-id="' + esc(l.id) + '" class="' + (ok ? 'row-ok' : '') + '">' +
+        '<td><label class="tick"><input type="checkbox" class="imp"' + (ok ? ' checked' : '') + '><span></span></label></td>' +
+        '<td><b>' + esc(l.registro) + '</b></td><td class="name">' + esc(l.nombre) + '</td><td>' + esc(runFormat(l.run)) +
         '</td><td>' + esc(fmtDate(l.emitida)) + '</td><td>' + esc(l.emitidaPor) + '</td><td class="actions"><button class="link" data-act="dl">Descargar PDF</button>' +
         (S.user.rol === 'admin' ? '<button class="link danger" data-act="del">Quitar</button>' : '') + '</td></tr>';
     }).join('');
     $('#archEmpty').classList.toggle('hidden', list.length > 0);
-    $('#btnArchAll').disabled = !list.length;
+    $('#archEmpty').textContent = S.licencias.length ? 'No hay licencias con este filtro.' : 'No hay licencias guardadas para ' + Licencia.NIVELES[S.nivel].curso + ' ' + S.anio + '.';
+    $('#btnArchAll').disabled = !list.length; $('#btnCotejo').disabled = !list.length;
   }
   $('#archSearch').addEventListener('input', renderArchivo);
+
+  function marcar(ids, valor) {
+    var set = {}; ids.forEach(function (i) { set[i] = true; });
+    S.licencias.forEach(function (l) { if (set[l.id]) l.impresa = valor; });
+    renderArchivo();
+    return api('marcarImpresa', { ids: ids, impresa: valor }).catch(function (e) { toast(e.message, true); loadArchivo(); });
+  }
+  $('#archTable tbody').addEventListener('change', function (e) {
+    if (!e.target.classList.contains('imp')) return;
+    marcar([e.target.closest('tr').dataset.id], e.target.checked);
+  });
+  $('#archStats').addEventListener('click', function (e) {
+    if (e.target.id === 'btnMarcarTodas') marcar(filteredLic().map(function (l) { return l.id; }), true).then(function () { toast('Marcadas como impresas'); });
+    if (e.target.id === 'btnDesmarcarTodas') marcar(filteredLic().map(function (l) { return l.id; }), false);
+  });
+
+  // Lista de cotejo: PDF tamaño carta vertical con casillas para revisar lo impreso
+  $('#btnCotejo').addEventListener('click', function () {
+    var list = filteredLic(); if (!list.length) return;
+    var filtro = { todas: 'Todas las licencias', pend: 'Licencias por imprimir', imp: 'Licencias impresas' }[S.archFiltro];
+    Licencia.listaCotejo(list.map(function (l) {
+      return { registro: l.registro, nombre: l.nombre, run: runFormat(l.run), emitida: fmtDate(l.emitida).split(' ')[0], impresa: esImpresa(l) };
+    }), {
+      nivel: S.nivel, anio: S.anio, colegio: S.config.colegio, rbd: S.config.rbd, filtro: filtro, usuario: S.user.nombre
+    }, S.assets).save('Lista_cotejo_' + (S.nivel === '8B' ? '8Basico' : '4Medio') + '_' + S.anio + '.pdf');
+  });
   // Re-descarga: usa los datos guardados al emitir (misma fecha, directora y colegio)
   function licRecords(list) { return list.map(function (l) { var d = Object.assign({}, l.datos); d.run = runFormat(d.run); return d; }); }
   $('#archTable tbody').addEventListener('click', function (e) {

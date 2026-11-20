@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Cormorant+Garamond:ital,wght@1,600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=3">
+<link rel="stylesheet" href="styles.css?v=4">
 </head>
 <body>
 
@@ -34,7 +34,7 @@
     </label>
     <button class="btn primary block" type="submit">Ingresar</button>
     <p class="error" id="loginError"></p>
-    <p class="ver">Versión 3 · acepta nómina PDF</p>
+    <p class="ver">Versión 4 · colores por curso y lista de cotejo</p>
     <p class="demo-note hidden" id="demoNote">Modo demostración: los datos se guardan solo en este navegador y se acepta cualquier clave. Configure <code>config.js</code> para usar Apps Script.</p>
   </form>
 </section>
@@ -57,16 +57,22 @@
   </header>
 
   <main class="wrap">
+    <!-- ---------- CURSO ACTIVO (aplica a Emitir y Archivo) ---------- -->
+    <div class="coursebar" id="coursebar">
+      <div class="course-id">
+        <span class="course-badge" id="courseBadge">4°<small>Medio</small></span>
+        <div><small>Curso activo</small><b id="courseName">4° Año Medio</b></div>
+      </div>
+      <div class="seg big" data-bind="nivel">
+        <button data-v="4M" class="on">4° Medio</button><button data-v="8B">8° Básico</button>
+      </div>
+      <label class="inline">Año <input type="number" id="anio" min="2000" max="2100"></label>
+      <span class="spacer"></span>
+      <span class="muted" id="cfgHint"></span>
+    </div>
+
     <!-- ---------- EMITIR ---------- -->
     <div class="view" id="view-emitir">
-      <div class="toolbar">
-        <div class="seg" data-bind="nivel">
-          <button data-v="4M" class="on">4° Medio</button><button data-v="8B">8° Básico</button>
-        </div>
-        <label class="inline">Año <input type="number" id="anio" min="2000" max="2100"></label>
-        <span class="spacer"></span>
-        <span class="muted" id="cfgHint"></span>
-      </div>
 
       <div class="grid2">
         <div class="card">
@@ -121,19 +127,20 @@
 
     <!-- ---------- ARCHIVO ---------- -->
     <div class="view hidden" id="view-archivo">
+      <div class="stats" id="archStats"></div>
       <div class="toolbar">
-        <div class="seg" data-bind="archNivel">
-          <button data-v="4M" class="on">4° Medio</button><button data-v="8B">8° Básico</button>
+        <div class="seg" data-bind="archFiltro">
+          <button data-v="todas" class="on">Todas</button><button data-v="pend">Por imprimir</button><button data-v="imp">Impresas</button>
         </div>
-        <label class="inline">Año <input type="number" id="archAnio" min="2000" max="2100"></label>
         <input type="search" id="archSearch" placeholder="Buscar por nombre, RUN o registro">
         <span class="spacer"></span>
-        <button class="btn primary" id="btnArchAll">Descargar todas (PDF)</button>
+        <button class="btn" id="btnCotejo">Lista de cotejo (PDF)</button>
+        <button class="btn primary" id="btnArchAll">Descargar licencias (PDF)</button>
       </div>
       <div class="card">
         <div class="table-wrap">
           <table class="tbl" id="archTable">
-            <thead><tr><th>N° reg.</th><th>Nombre</th><th>R.U.N.</th><th>Emitida</th><th>Por</th><th></th></tr></thead>
+            <thead><tr><th style="width:80px">Impresa</th><th>N° reg.</th><th>Nombre</th><th>R.U.N.</th><th>Emitida</th><th>Por</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
           <p class="empty hidden" id="archEmpty">No hay licencias guardadas para este curso y año.</p>
@@ -232,8 +239,8 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="config.js?v=3"></script>
-<script src="licencia.js?v=3"></script>
-<script src="app.js?v=3"></script>
+<script src="config.js?v=4"></script>
+<script src="licencia.js?v=4"></script>
+<script src="app.js?v=4"></script>
 </body>
 </html>

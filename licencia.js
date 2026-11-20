@@ -470,6 +470,115 @@
     doc.internal.write('Q');
   }
 
+  /* ======================= Lista de cotejo ======================= */
+  // Colores por curso (mismos de la página): 4° Medio azul, 8° Básico verde
+  var COLOR_CURSO = { '4M': [19, 42, 84], '8B': [24, 92, 70] };
+  var TINTE_CURSO = { '4M': [238, 242, 249], '8B': [234, 244, 238] };
+
+  function caja(doc, x, y, s, marcada, color) {
+    doc.setDrawColor(70, 72, 82); doc.setLineWidth(0.3);
+    doc.rect(x, y, s, s);
+    if (marcada) {
+      doc.setDrawColor.apply(doc, color); doc.setLineWidth(0.7);
+      doc.lines([[s * 0.28, s * 0.3], [s * 0.5, -s * 0.62]], x + s * 0.18, y + s * 0.52, [1, 1], 'S', false);
+    }
+  }
+
+  function listaCotejo(items, info, assets) {
+    var jsPDF = global.jspdf.jsPDF;
+    var doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'letter', compress: true });
+    registerFonts(doc);
+    var PW = 215.9, PH = 279.4, M = 15, col = COLOR_CURSO[info.nivel] || COLOR_CURSO['4M'], tint = TINTE_CURSO[info.nivel] || TINTE_CURSO['4M'];
+    var curso = (NIVELES[info.nivel] || NIVELES['4M']).curso;
+    var cols = [['N°', 9, 'c'], ['Registro', 17, 'c'], ['Nombre del estudiante', 80, 'l'], ['R.U.N.', 28, 'c'],
+      ['Impresa', 17, 'c'], ['Revisada', 17, 'c'], ['Firmada', 17, 'c']];
+    var hoy = new Date(), fechaHoy = hoy.getDate() + ' de ' + MESES[hoy.getMonth()] + ' de ' + hoy.getFullYear();
+    var imp = items.filter(function (i) { return i.impresa; }).length;
+
+    function encabezado(primera) {
+      doc.setFillColor.apply(doc, col); doc.rect(0, 0, PW, 5, 'F');
+      doc.setFillColor.apply(doc, C.gold); doc.rect(0, 5, PW, 0.8, 'F');
+      var y0 = 12;
+      if (primera) {
+        if (assets && assets.colegio) drawImageFit(doc, assets.colegio, M, y0, 22, 22, 'l');
+        var tx = assets && assets.colegio ? M + 27 : M;
+        setF(doc, 'serif', 'bold', 19, col); doc.text('Lista de cotejo de licencias', tx, y0 + 7);
+        setF(doc, 'serif', 'bold', 12, C.ink); doc.text(curso + ' · ' + info.anio, tx, y0 + 13.5);
+        setF(doc, 'serif', 'normal', 9.5, C.gray);
+        doc.text((info.colegio || '') + (info.rbd ? '  ·  RBD ' + info.rbd : ''), tx, y0 + 18.5);
+        setF(doc, 'serif', 'normal', 8.5, C.gray);
+        doc.text('Generada el ' + fechaHoy, PW - M, y0 + 4, { align: 'right' });
+        doc.text(info.filtro || '', PW - M, y0 + 8.5, { align: 'right' });
+        if (info.usuario) doc.text('Por: ' + info.usuario, PW - M, y0 + 13, { align: 'right' });
+        // resumen
+        var bx = M, by = y0 + 26, bw = (PW - 2 * M - 8) / 3;
+        [['Licencias en la lista', items.length, col], ['Marcadas impresas', imp, [31, 122, 77]], ['Por imprimir', items.length - imp, [154, 91, 0]]]
+          .forEach(function (b, i) {
+            var x = bx + i * (bw + 4);
+            doc.setFillColor.apply(doc, tint); doc.roundedRect(x, by, bw, 13, 1.5, 1.5, 'F');
+            doc.setFillColor.apply(doc, b[2]); doc.rect(x, by, 1.2, 13, 'F');
+            setF(doc, 'serif', 'bold', 16, b[2]); doc.text(String(b[1]), x + 5, by + 8.6);
+            var nw = doc.getTextWidth(String(b[1]));
+            setF(doc, 'serif', 'normal', 9, C.gray); doc.text(b[0], x + 5 + nw + 2.5, by + 8.2);
+          });
+        return by + 19;
+      }
+      setF(doc, 'serif', 'bold', 11, col); doc.text('Lista de cotejo · ' + curso + ' ' + info.anio, M, y0 + 3);
+      setF(doc, 'serif', 'normal', 8.5, C.gray); doc.text(info.colegio || '', PW - M, y0 + 3, { align: 'right' });
+      return y0 + 8;
+    }
+
+    function cabeceraTabla(y) {
+      doc.setFillColor.apply(doc, col); doc.rect(M, y, PW - 2 * M, 8, 'F');
+      setF(doc, 'serif', 'bold', 9.5, [255, 255, 255]);
+      var x = M;
+      cols.forEach(function (c) {
+        doc.text(c[0], c[2] === 'c' ? x + c[1] / 2 : x + 2.5, y + 5.4, { align: c[2] === 'c' ? 'center' : 'left' });
+        x += c[1];
+      });
+      return y + 8;
+    }
+
+    var RH = 7.2, y = cabeceraTabla(encabezado(true)), limite = PH - 22;
+    items.forEach(function (it, i) {
+      if (y + RH > limite) { doc.addPage('letter', 'portrait'); y = cabeceraTabla(encabezado(false)); }
+      if (i % 2 === 1) { doc.setFillColor.apply(doc, tint); doc.rect(M, y, PW - 2 * M, RH, 'F'); }
+      doc.setDrawColor(222, 222, 228); doc.setLineWidth(0.15); doc.line(M, y + RH, PW - M, y + RH);
+      var x = M, base = y + 4.9;
+      setF(doc, 'serif', 'normal', 9, C.gray); doc.text(String(i + 1), x + cols[0][1] / 2, base, { align: 'center' }); x += cols[0][1];
+      setF(doc, 'serif', 'bold', 10.5, col); doc.text(String(it.registro || ''), x + cols[1][1] / 2, base, { align: 'center' }); x += cols[1][1];
+      setF(doc, 'serif', 'normal', 10.5, C.ink);
+      var nom = String(it.nombre || ''); fit(doc, nom, cols[2][1] - 4, 10.5, 7.5);
+      doc.text(nom, x + 2.5, base); x += cols[2][1];
+      setF(doc, 'serif', 'normal', 10, C.ink); doc.text(String(it.run || ''), x + cols[3][1] / 2, base, { align: 'center' }); x += cols[3][1];
+      [it.impresa, false, false].forEach(function (m, k) {
+        var w = cols[4 + k][1]; caja(doc, x + w / 2 - 2, y + 1.6, 4, m, [31, 122, 77]); x += w;
+      });
+      y += RH;
+    });
+
+    // cierre: firma de revisión
+    if (y + 26 > PH - 18) { doc.addPage('letter', 'portrait'); y = encabezado(false) + 4; }
+    y += 14;
+    doc.setDrawColor.apply(doc, C.gray); doc.setLineWidth(0.3);
+    doc.line(M, y, M + 70, y); doc.line(PW - M - 70, y, PW - M, y);
+    setF(doc, 'serif', 'normal', 8.5, C.gray);
+    doc.text('Revisado por (nombre y firma)', M + 35, y + 4, { align: 'center' });
+    doc.text('Fecha de revisión', PW - M - 35, y + 4, { align: 'center' });
+
+    // pie con número de página
+    var n = doc.getNumberOfPages();
+    for (var p = 1; p <= n; p++) {
+      doc.setPage(p);
+      doc.setDrawColor(222, 222, 228); doc.setLineWidth(0.2); doc.line(M, PH - 13, PW - M, PH - 13);
+      setF(doc, 'serif', 'normal', 8, C.gray);
+      doc.text('Lista de cotejo · ' + curso + ' ' + info.anio + ' · Casilla "Impresa" con marca = registrada como impresa en el sistema', M, PH - 8.5);
+      doc.text('Página ' + p + ' de ' + n, PW - M, PH - 8.5, { align: 'right' });
+    }
+    finalizar(doc, 'Lista de cotejo ' + curso + ' ' + info.anio);
+    return doc;
+  }
+
   /* Hoja de prueba de alineación: marco exacto a 10 mm del borde, cruz central y reglas. */
   function pruebaAlineacion(opts) {
     var jsPDF = global.jspdf.jsPDF;
@@ -518,6 +627,7 @@
     loadFonts: loadFonts,
     prepareAssets: prepareAssets,
     build: build,
-    pruebaAlineacion: pruebaAlineacion
+    pruebaAlineacion: pruebaAlineacion,
+    listaCotejo: listaCotejo
   };
 })(window);

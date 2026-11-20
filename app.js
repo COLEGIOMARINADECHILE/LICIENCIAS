@@ -118,7 +118,7 @@
         var now = new Date().toISOString();
         return st.map(function (s) {
           var rec = { nivel: s.nivel, anio: s.anio, registro: s.registro, nombre: s.nombre, run: s.run, sexo: s.sexo,
-            colegio: c.colegio, rbd: c.rbd, region: c.region, provincia: c.provincia, comuna: c.comuna, anioEscolar: c.anioEscolar || s.anio,
+            colegio: c.colegio, rbd: c.rbd, region: c.region, provincia: c.provincia, comuna: c.comuna, anioEscolar: s.anio,
             directora: c.directora, cargo: c.cargo || 'Director(a) del Establecimiento', ciudad: c.ciudad, fecha: c.fecha };
           d.lic = d.lic.filter(function (l) { return l.studentId !== s.id; });
           d.lic.push({ id: id('l-'), studentId: s.id, nivel: s.nivel, anio: s.anio, registro: s.registro, nombre: s.nombre, run: s.run, emitida: now, emitidaPor: u.nombre, datos: rec });
@@ -129,6 +129,42 @@
         return d.lic.filter(function (l) { return l.nivel === q.nivel && l.anio === String(q.anio); })
           .sort(function (a, b) { return (Number(a.registro) || 0) - (Number(b.registro) || 0); });
       },
+      listAlumnos: function (d, q) {
+        d.alumnos = d.alumnos || []; d.dips = d.dips || [];
+        var cnt = {}; d.dips.forEach(function (x) { if (x.anio === String(q.anio)) cnt[x.alumnoId] = (cnt[x.alumnoId] || 0) + 1; });
+        return d.alumnos.filter(function (a) { return a.anio === String(q.anio); })
+          .map(function (a) { return Object.assign({}, a, { diplomas: cnt[a.id] || 0 }); })
+          .sort(function (a, b) { return a.curso.localeCompare(b.curso, 'es', { numeric: true }) || a.nombre.localeCompare(b.nombre); });
+      },
+      importAlumnos: function (d, q, u) {
+        d.alumnos = d.alumnos || []; var seen = {}, add = 0, om = 0;
+        d.alumnos.forEach(function (a) { if (a.anio === String(q.anio)) seen[runClean(a.run) || a.curso + '|' + a.nombre] = 1; });
+        (q.alumnos || []).forEach(function (r) {
+          var k = runClean(r.run) || r.curso + '|' + r.nombre;
+          if (!r.nombre || !r.curso || seen[k]) { om++; return; }
+          seen[k] = 1; add++;
+          d.alumnos.push({ id: id('a-'), anio: String(q.anio), curso: String(r.curso).trim(), nombre: String(r.nombre).trim(), run: String(r.run || ''), creadoPor: u.nombre });
+        });
+        return { agregados: add, omitidos: om };
+      },
+      deleteAlumno: function (d, q) { d.alumnos = (d.alumnos || []).filter(function (a) { return a.id !== q.id; }); return true; },
+      deleteCurso: function (d, q) { d.alumnos = (d.alumnos || []).filter(function (a) { return !(a.anio === String(q.anio) && a.curso === q.curso); }); return true; },
+      emitirDiplomas: function (d, q, u) {
+        d.dips = d.dips || []; var c = d.config, now = new Date().toISOString();
+        if (!q.motivo) throw new Error('Indique el motivo del diploma');
+        if (!c.directora) throw new Error('Complete el nombre de la directora en "Datos del colegio"');
+        return (d.alumnos || []).filter(function (a) { return q.ids.indexOf(a.id) >= 0; }).map(function (a) {
+          var rec = { tipo: 'diploma', nombre: a.nombre, curso: a.curso, run: a.run, motivo: q.motivo, fecha: q.fecha, colegio: c.colegio || '',
+            directora: c.directora, cargo: c.cargo || 'Director(a) del Establecimiento', ciudad: c.ciudad || '' };
+          d.dips.push({ id: id('d-'), anio: a.anio, alumnoId: a.id, curso: a.curso, nombre: a.nombre, run: a.run, motivo: q.motivo, fecha: q.fecha, datos: rec, emitido: now, emitidoPor: u.nombre });
+          return rec;
+        });
+      },
+      listDiplomas: function (d, q) {
+        return (d.dips || []).filter(function (x) { return x.anio === String(q.anio); })
+          .sort(function (a, b) { return String(b.emitido).localeCompare(String(a.emitido)) || a.nombre.localeCompare(b.nombre); });
+      },
+      deleteDiploma: function (d, q) { d.dips = (d.dips || []).filter(function (x) { return x.id !== q.id; }); return true; },
       marcarImpresa: function (d, q) {
         d.lic.forEach(function (l) { if ((q.ids || []).indexOf(l.id) >= 0) l.impresa = !!q.impresa; }); return true;
       },
@@ -188,10 +224,41 @@
     document.body.classList.toggle('is-admin', user.rol === 'admin');
     $('#meName').textContent = user.nombre;
     $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
-    $('#anio').value = S.anio;
     aplicarCurso();
-    return loadConfig().then(loadStudents);
+    return loadConfig().then(function () { renderAnios(); return loadStudents(); });
   }
+
+  /* ---------------- año de trabajo ----------------
+     Por defecto es el año del calendario: el 1 de enero pasa solo al año nuevo.
+     Los datos de cada año quedan guardados y se pueden volver a consultar eligiéndolo. */
+  function aniosDisponibles() {
+    var set = {};
+    String(S.config.anios || '').split(',').forEach(function (a) { if (/^\d{4}$/.test(a.trim())) set[a.trim()] = 1; });
+    set[YEAR] = 1; set[S.anio] = 1;
+    for (var y = 2026; y < Number(YEAR); y++) set[String(y)] = 1; // años anteriores desde que se usa el sistema
+    return Object.keys(set).sort().reverse();
+  }
+  function renderAnios() {
+    $('#anio').innerHTML = aniosDisponibles().map(function (a) {
+      return '<option value="' + a + '"' + (a === S.anio ? ' selected' : '') + '>' + a + (a === YEAR ? ' (actual)' : '') + '</option>';
+    }).join('') + '<option value="nuevo">+ Crear año nuevo…</option>';
+  }
+  function cambiarAnio(a) {
+    S.anio = String(a); renderAnios(); recargarCurso(); refreshAssets();
+    if (S.view === 'diplomas') loadDiplomas();
+  }
+  $('#anio').addEventListener('change', function () {
+    if (this.value !== 'nuevo') return cambiarAnio(this.value);
+    var sig = String(Number(aniosDisponibles()[0]) + 1);
+    renderAnios();
+    confirmDlg('Crear año nuevo', 'Se creará el año <b>' + sig + '</b> para trabajar sus licencias y diplomas. Los datos de los años anteriores quedan guardados y se pueden consultar eligiéndolos en esta lista.').then(function (ok) {
+      if (!ok) return;
+      var lista = aniosDisponibles().concat([sig]).sort().join(',');
+      api('saveConfig', { config: { anios: lista } }).then(function (c) {
+        S.config = c; cambiarAnio(sig); toast('Año ' + sig + ' creado');
+      }).catch(function (e) { toast(e.message, true); });
+    });
+  });
 
   /* ---------------- navegación ---------------- */
   S.view = 'emitir'; S.archFiltro = 'todas';
@@ -203,7 +270,10 @@
     $('.actionbar').classList.toggle('hidden', S.view !== 'emitir');
     // el curso activo solo aplica a Emitir y Archivo
     $('#coursebar').classList.toggle('hidden', S.view !== 'emitir' && S.view !== 'archivo');
+    document.body.classList.toggle('modo-dip', S.view === 'diplomas');
     if (S.view === 'archivo') loadArchivo();
+    if (S.view === 'diplomas') loadDiplomas();
+    else $('#dipActionbar').classList.add('hidden');
     if (S.view === 'usuarios') loadUsersAdmin();
     if (S.view === 'colegio') fillConfigForm();
   });
@@ -216,8 +286,6 @@
       if (seg.dataset.bind === 'archFiltro') { S.archFiltro = b.dataset.v; renderArchivo(); }
     });
   });
-  $('#anio').addEventListener('change', function () { S.anio = this.value; recargarCurso(); });
-
   /* Curso activo: cambia el color de toda la página y muestra solo los datos de ese curso */
   function aplicarCurso() {
     document.body.classList.toggle('curso-8B', S.nivel === '8B');
@@ -245,7 +313,8 @@
     $('#brandLogo').src = S.config.logoColegio || (pre && pre.src) || def.colegio || '';
     var faltan = !S.config.colegio || !S.config.directora || !S.config.fecha;
     $('#cfgHint').innerHTML = faltan ? '<span class="chip warn">Faltan datos del colegio</span>'
-      : 'Fecha de impresión: <b>' + esc((S.config.ciudad ? S.config.ciudad + ', ' : '') + Licencia.fechaLarga(S.config.fecha)) + '</b>';
+      : 'Fecha de impresión: <b>' + esc((S.config.ciudad ? S.config.ciudad + ', ' : '') + Licencia.fechaLarga(S.config.fecha)) + '</b>' +
+        (String(S.config.fecha).slice(0, 4) !== S.anio ? ' <span class="chip warn">La fecha es de otro año: actualícela en "Datos del colegio"</span>' : '');
     return Licencia.prepareAssets(S.config).then(function (a) { S.assets = a; });
   }
   function bordeOn(c) { return String((c || S.config).borde) !== 'false'; }
@@ -256,15 +325,15 @@
 
   function fillConfigForm() {
     var f = $('#cfgForm'), c = S.config;
-    ['colegio', 'rbd', 'region', 'provincia', 'comuna', 'anioEscolar', 'directora', 'cargo', 'ciudad', 'fecha', 'ajusteX', 'ajusteY'].forEach(function (k) {
-      f.elements[k].value = c[k] || (k === 'anioEscolar' ? YEAR : k === 'cargo' ? 'Directora del Establecimiento' : /^ajuste/.test(k) ? '0' : '');
+    ['colegio', 'rbd', 'region', 'provincia', 'comuna', 'directora', 'cargo', 'ciudad', 'fecha', 'ajusteX', 'ajusteY'].forEach(function (k) {
+      f.elements[k].value = c[k] || (k === 'cargo' ? 'Directora del Establecimiento' : /^ajuste/.test(k) ? '0' : '');
     });
     f.elements.borde.checked = bordeOn(c);
     renderInsignias();
   }
   function readConfigForm() {
     var f = $('#cfgForm'), o = {};
-    ['colegio', 'rbd', 'region', 'provincia', 'comuna', 'anioEscolar', 'directora', 'cargo', 'ciudad', 'fecha', 'ajusteX', 'ajusteY'].forEach(function (k) { o[k] = f.elements[k].value.trim(); });
+    ['colegio', 'rbd', 'region', 'provincia', 'comuna', 'directora', 'cargo', 'ciudad', 'fecha', 'ajusteX', 'ajusteY'].forEach(function (k) { o[k] = f.elements[k].value.trim(); });
     o.borde = f.elements.borde.checked ? 'true' : 'false';
     return o;
   }
@@ -450,7 +519,7 @@
       file.arrayBuffer().then(parsePdf).then(function (r) {
         if (!r.students.length) throw new Error('No se encontraron estudiantes en el PDF. ¿Es la "Nómina de Alumnos Licenciados" del Mineduc?');
         if (r.meta.nivel && r.meta.nivel !== S.nivel) setNivel(r.meta.nivel);
-        if (r.meta.anio && r.meta.anio !== S.anio) { S.anio = r.meta.anio; $('#anio').value = S.anio; recargarCurso(); }
+        if (r.meta.anio && r.meta.anio !== S.anio) cambiarAnio(r.meta.anio);
         showPreview(r.students, file.name, r.meta);
       }).catch(function (e) { toast(e.message || 'No se pudo leer el PDF', true); }).then(function () { busy(false); });
       return;
@@ -601,6 +670,9 @@
         else if (/^(run|rut|runestudiante|rutestudiante|rutalumno)$/.test(c)) m.run = j;
         else if (/^(dv|digitoverificador)$/.test(c)) m.dv = j;
         else if (/^(sexo|genero)$/.test(c)) m.sexo = j;
+        else if (/^(curso|cursos|nombrecurso|cursoalumno)$/.test(c)) m.curso = j;
+        else if (/^(grado|nivel|desgrado)$/.test(c)) m.grado = j;
+        else if (/^(letra|letracurso|paralelo|seccion)$/.test(c)) m.letra = j;
         else if (/registro/.test(c)) m.registro = j;
       });
       if (m.nombre != null || m.nombres != null) { hi = i; idx = m; }
@@ -613,6 +685,8 @@
       return {
         nombre: titleCase(String(nombre || '').replace(/\s+/g, ' ').trim()),
         run: runFormat(run), sexo: idx.sexo != null ? String(r[idx.sexo]) : '',
+        curso: idx.curso != null ? String(r[idx.curso]).trim()
+          : [idx.grado != null ? r[idx.grado] : '', idx.letra != null ? r[idx.letra] : ''].join(' ').trim(),
         registro: idx.registro != null ? String(r[idx.registro]).trim() : ''
       };
     }).filter(function (s) { return s.nombre; });
@@ -650,7 +724,7 @@
   function recordFor(s, c) {
     c = c || S.config;
     return { nivel: S.nivel, anio: S.anio, registro: s.registro, nombre: s.nombre, run: runFormat(s.run), sexo: s.sexo,
-      colegio: c.colegio, rbd: c.rbd, region: c.region, provincia: c.provincia, comuna: c.comuna, anioEscolar: c.anioEscolar || S.anio,
+      colegio: c.colegio, rbd: c.rbd, region: c.region, provincia: c.provincia, comuna: c.comuna, anioEscolar: S.anio,
       directora: c.directora, cargo: c.cargo, ciudad: c.ciudad, fecha: c.fecha };
   }
   function openPdf(records, c) {
@@ -767,6 +841,208 @@
     });
   });
   $('#btnArchAll').addEventListener('click', function () { var l = filteredLic(); if (l.length) savePdf(licRecords(l)); });
+
+  /* ======================= DIPLOMAS DE RECONOCIMIENTO ======================= */
+  S.alumnos = []; S.dipSel = {}; S.diplomas = []; S.dipCurso = ''; S.dipPending = null;
+  function hoyISO() { var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+  $('#dipFecha').value = hoyISO();
+  function porCurso(a, b) { return String(a).localeCompare(String(b), 'es', { numeric: true }); }
+
+  function loadDiplomas() {
+    var anio = S.anio;
+    $('#dipTitle').textContent = 'Todos los cursos · ' + anio;
+    return Promise.all([api('listAlumnos', { anio: anio }), api('listDiplomas', { anio: anio })]).then(function (r) {
+      if (anio !== S.anio) return;
+      S.alumnos = r[0]; S.diplomas = r[1];
+      var ids = {}; S.alumnos.forEach(function (a) { ids[a.id] = 1; });
+      Object.keys(S.dipSel).forEach(function (k) { if (!ids[k]) delete S.dipSel[k]; });
+      renderAlumnos(); renderDiplomas();
+    }).catch(function (e) { toast(e.message, true); });
+  }
+
+  function cursosDe(list) {
+    var c = {}; list.forEach(function (a) { if (a.curso) c[a.curso] = (c[a.curso] || 0) + 1; });
+    return Object.keys(c).sort(porCurso).map(function (k) { return [k, c[k]]; });
+  }
+
+  function renderAlumnos() {
+    var cursos = cursosDe(S.alumnos);
+    if (S.dipCurso && !cursos.some(function (c) { return c[0] === S.dipCurso; })) S.dipCurso = '';
+    $('#dipCurso').innerHTML = '<option value="">Todos los cursos (' + S.alumnos.length + ')</option>' + cursos.map(function (c) {
+      return '<option value="' + esc(c[0]) + '"' + (c[0] === S.dipCurso ? ' selected' : '') + '>' + esc(c[0]) + ' (' + c[1] + ')</option>';
+    }).join('');
+    $('#btnDelCurso').classList.toggle('hidden', !S.dipCurso);
+    var list = alumnosFiltrados();
+    $('#alumTable tbody').innerHTML = list.map(function (a) {
+      return '<tr data-id="' + esc(a.id) + '" class="' + (S.dipSel[a.id] ? 'row-sel' : '') + '"><td><input type="checkbox" class="dsel"' + (S.dipSel[a.id] ? ' checked' : '') + '></td>' +
+        '<td class="name">' + esc(a.nombre) + '</td><td><span class="chip curso">' + esc(a.curso) + '</span></td><td>' + esc(runFormat(a.run)) + '</td>' +
+        '<td>' + (a.diplomas ? '<span class="chip ok">' + a.diplomas + ' diploma' + (a.diplomas > 1 ? 's' : '') + '</span>' : '<span class="muted">—</span>') + '</td>' +
+        '<td class="actions"><button class="link danger" data-act="del">Quitar</button></td></tr>';
+    }).join('');
+    $('#alumEmpty').classList.toggle('hidden', list.length > 0);
+    $('#alumEmpty').textContent = S.alumnos.length ? 'No hay alumnos con este filtro.' : 'Aún no hay alumnos cargados para ' + S.anio + '. Cargue la lista de todos los cursos.';
+    $('#alumCount').textContent = S.alumnos.length ? '· ' + S.alumnos.length + ' alumnos en ' + cursos.length + ' cursos' : '';
+    $('#dipStats').innerHTML = '<span><b>' + S.alumnos.length + '</b> alumnos</span><span><b>' + cursos.length + '</b> cursos</span><span><b>' + S.diplomas.length + '</b> diplomas</span>';
+    updDipSel();
+  }
+  function alumnosFiltrados() {
+    var q = norm($('#dipSearch').value);
+    return S.alumnos.filter(function (a) {
+      return (!S.dipCurso || a.curso === S.dipCurso) && (!q || norm(a.nombre + a.run + a.curso).indexOf(q) >= 0);
+    });
+  }
+  function updDipSel() {
+    var n = Object.keys(S.dipSel).length, vis = alumnosFiltrados();
+    $('#dipSelInfo').textContent = n + ' alumno' + (n === 1 ? '' : 's') + ' seleccionado' + (n === 1 ? '' : 's');
+    $('#dipActionbar').classList.toggle('hidden', !(n > 0 && S.view === 'diplomas'));
+    $('#dipChkAll').checked = vis.length > 0 && vis.every(function (a) { return S.dipSel[a.id]; });
+  }
+  $('#dipCurso').addEventListener('change', function () { S.dipCurso = this.value; renderAlumnos(); });
+  $('#dipSearch').addEventListener('input', renderAlumnos);
+  $('#dipChkAll').addEventListener('change', function () {
+    var on = this.checked;
+    alumnosFiltrados().forEach(function (a) { if (on) S.dipSel[a.id] = true; else delete S.dipSel[a.id]; });
+    renderAlumnos();
+  });
+  $('#alumTable tbody').addEventListener('change', function (e) {
+    if (!e.target.classList.contains('dsel')) return;
+    var tr = e.target.closest('tr'), id = tr.dataset.id;
+    if (e.target.checked) S.dipSel[id] = true; else delete S.dipSel[id];
+    tr.classList.toggle('row-sel', e.target.checked); updDipSel();
+  });
+  $('#alumTable tbody').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-act="del"]'); if (!b) return;
+    var a = S.alumnos.filter(function (x) { return x.id === b.closest('tr').dataset.id; })[0];
+    confirmDlg('Quitar alumno', '¿Quitar a <b>' + esc(a.nombre) + '</b> de la lista? Sus diplomas ya emitidos se mantienen en el archivo.').then(function (ok) {
+      if (ok) api('deleteAlumno', { id: a.id }).then(loadDiplomas).catch(function (err) { toast(err.message, true); });
+    });
+  });
+  $('#btnDelCurso').addEventListener('click', function () {
+    var c = S.dipCurso; if (!c) return;
+    confirmDlg('Eliminar curso', '¿Quitar a todos los alumnos de <b>' + esc(c) + '</b> (' + S.anio + ')? Los diplomas ya emitidos se mantienen.').then(function (ok) {
+      if (ok) api('deleteCurso', { anio: S.anio, curso: c }).then(function () { S.dipCurso = ''; return loadDiplomas(); }).catch(function (err) { toast(err.message, true); });
+    });
+  });
+  $('#btnDipClear').addEventListener('click', function () { S.dipSel = {}; renderAlumnos(); });
+
+  // --- carga de la lista (Excel/CSV con curso, o nómina PDF de un curso) ---
+  var dDrop = $('#dipDrop');
+  ['dragover', 'dragenter'].forEach(function (ev) { dDrop.addEventListener(ev, function () { dDrop.classList.add('over'); }); });
+  ['dragleave', 'drop'].forEach(function (ev) { dDrop.addEventListener(ev, function () { dDrop.classList.remove('over'); }); });
+  $('#dipFile').addEventListener('change', function () { if (this.files[0]) leerListaDiplomas(this.files[0]); this.value = ''; });
+
+  function leerListaDiplomas(file) {
+    file.slice(0, 5).arrayBuffer().then(function (b) {
+      var esPdf = String.fromCharCode.apply(null, new Uint8Array(b)).indexOf('%PDF') === 0 || /\.pdf$/i.test(file.name);
+      if (esPdf) {
+        busy(true, 'Leyendo PDF…');
+        return file.arrayBuffer().then(parsePdf).then(function (r) {
+          var cursoPdf = r.meta.nivel === '8B' ? '8° Básico' : r.meta.nivel === '4M' ? '4° Medio' : '';
+          return r.students.map(function (s) { return { nombre: s.nombre, run: s.run, curso: cursoPdf }; });
+        }).then(function (l) { busy(false); return l; }, function (e) { busy(false); throw e; });
+      }
+      var isCsv = /\.csv$/i.test(file.name);
+      return (isCsv ? file.text().then(function (t) { return XLSX.read(t.replace(/^﻿/, ''), { type: 'string', raw: true }); })
+        : file.arrayBuffer().then(function (bb) { return XLSX.read(bb, { type: 'array' }); })).then(function (wb) {
+        // lee TODAS las hojas (algunos colegios tienen una hoja por curso; el nombre de la hoja sirve como curso)
+        var out = [];
+        wb.SheetNames.forEach(function (sn) {
+          mapRows(XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: '', raw: false })).forEach(function (s) {
+            out.push({ nombre: s.nombre, run: s.run, curso: s.curso || (wb.SheetNames.length > 1 ? sn : '') });
+          });
+        });
+        return out;
+      });
+    }).then(function (lista) {
+      if (!lista.length) throw new Error('No se encontraron alumnos. Revise que existan las columnas "curso" y "nombre".');
+      S.dipPending = lista;
+      var sinCurso = lista.filter(function (a) { return !a.curso; }).length;
+      var cursos = cursosDe(lista);
+      $('#dipImportInfo').innerHTML = '<div class="imp-head"><b>' + lista.length + '</b> alumnos detectados en <i>' + esc(file.name) + '</i> para el año <b>' + esc(S.anio) + '</b></div>' +
+        (cursos.length ? '<div class="kvs mt-s">' + cursos.map(function (c) { return '<span class="kv"><small>' + c[1] + ' alumnos</small>' + esc(c[0]) + '</span>'; }).join('') + '</div>' : '') +
+        (sinCurso ? '<label class="mt-s">Curso para los ' + sinCurso + ' alumnos sin curso<input id="dipCursoDef" placeholder="Ej.: 3° Básico A"></label>' : '');
+      $('#dipImport').classList.remove('hidden');
+    }).catch(function (e) { toast(e.message || 'No se pudo leer el archivo', true); });
+  }
+  $('#btnDipCancel').addEventListener('click', function () { S.dipPending = null; $('#dipImport').classList.add('hidden'); });
+  $('#btnDipImport').addEventListener('click', function () {
+    var def = $('#dipCursoDef') ? $('#dipCursoDef').value.trim() : '';
+    var lista = (S.dipPending || []).map(function (a) { return { nombre: a.nombre, run: a.run, curso: a.curso || def }; });
+    if (lista.some(function (a) { return !a.curso; })) return toast('Indique el curso de los alumnos que no lo tienen', true);
+    busy(true, 'Agregando alumnos…');
+    api('importAlumnos', { anio: S.anio, alumnos: lista }).then(function (r) {
+      S.dipPending = null; $('#dipImport').classList.add('hidden');
+      toast(r.agregados + ' alumnos agregados' + (r.omitidos ? ' · ' + r.omitidos + ' omitidos (repetidos o sin curso)' : ''));
+      return loadDiplomas();
+    }).catch(function (e) { toast(e.message, true); }).then(function () { busy(false); });
+  });
+
+  // --- motivo, fecha, generación ---
+  $('#dipMotivoSel').addEventListener('change', function () { $('#dipOtroWrap').classList.toggle('hidden', this.value !== 'otro'); });
+  function motivoActual() { var v = $('#dipMotivoSel').value; return v === 'otro' ? $('#dipMotivoOtro').value.trim() : v; }
+  function dipRecord(a, motivo, fecha) {
+    var c = S.config;
+    return { tipo: 'diploma', nombre: a.nombre, curso: a.curso, motivo: motivo, fecha: fecha, colegio: c.colegio || window.COLEGIO_NOMBRE || '',
+      directora: c.directora, cargo: c.cargo, ciudad: c.ciudad };
+  }
+  $('#btnDipPreview').addEventListener('click', function () {
+    var a = S.alumnos.filter(function (x) { return S.dipSel[x.id]; })[0] || S.alumnos[0] || { nombre: 'Nombre Apellido Apellido', curso: '3° Básico A' };
+    var w = window.open('', '_blank');
+    var url = Licencia.buildDiplomas([dipRecord(a, motivoActual() || 'Su destacada participación', $('#dipFecha').value || hoyISO())], S.assets, printOpts()).output('bloburl');
+    if (w) w.location.href = url; else window.location.href = url;
+  });
+  $('#btnDipEmitir').addEventListener('click', function () {
+    var ids = Object.keys(S.dipSel), motivo = motivoActual(), fecha = $('#dipFecha').value;
+    if (!ids.length) return toast('Seleccione al menos un alumno', true);
+    if (!motivo) return toast('Escriba el motivo del diploma', true);
+    if (!fecha) return toast('Indique la fecha del diploma', true);
+    busy(true, 'Generando ' + ids.length + ' diploma(s)…');
+    api('emitirDiplomas', { anio: S.anio, ids: ids, motivo: motivo, fecha: fecha }).then(function (recs) {
+      recs.sort(function (a, b) { return porCurso(a.curso, b.curso) || a.nombre.localeCompare(b.nombre); });
+      Licencia.buildDiplomas(recs, S.assets, printOpts()).save('Diplomas_' + slug(motivo).slice(0, 40) + '_' + fecha + '.pdf');
+      toast(recs.length + ' diploma(s) generados y guardados');
+      S.dipSel = {};
+      return loadDiplomas();
+    }).catch(function (e) { toast(e.message, true); }).then(function () { busy(false); });
+  });
+
+  // --- archivo de diplomas ---
+  function diplomasFiltrados() {
+    var c = $('#dipArchCurso').value, m = $('#dipArchMotivo').value;
+    return S.diplomas.filter(function (d) { return (!c || d.curso === c) && (!m || d.motivo === m); });
+  }
+  function renderDiplomas() {
+    var cSel = $('#dipArchCurso').value, mSel = $('#dipArchMotivo').value;
+    var motivos = {}; S.diplomas.forEach(function (d) { motivos[d.motivo] = (motivos[d.motivo] || 0) + 1; });
+    $('#dipArchCurso').innerHTML = '<option value="">Todos los cursos</option>' + cursosDe(S.diplomas).map(function (c) {
+      return '<option value="' + esc(c[0]) + '"' + (c[0] === cSel ? ' selected' : '') + '>' + esc(c[0]) + ' (' + c[1] + ')</option>'; }).join('');
+    $('#dipArchMotivo').innerHTML = '<option value="">Todos los motivos</option>' + Object.keys(motivos).sort().map(function (m) {
+      return '<option value="' + esc(m) + '"' + (m === mSel ? ' selected' : '') + '>' + esc(m) + ' (' + motivos[m] + ')</option>'; }).join('');
+    var list = diplomasFiltrados();
+    $('#dipTable tbody').innerHTML = list.map(function (d) {
+      return '<tr data-id="' + esc(d.id) + '"><td>' + esc(Licencia.fechaLarga(d.fecha)) + '</td><td class="name">' + esc(d.nombre) + '</td><td><span class="chip curso">' + esc(d.curso) +
+        '</span></td><td>' + esc(d.motivo) + '</td><td>' + esc(d.emitidoPor) + '<br><small class="muted">' + esc(fmtDate(d.emitido)) + '</small></td>' +
+        '<td class="actions"><button class="link" data-act="dl">Descargar PDF</button>' + (S.user.rol === 'admin' ? '<button class="link danger" data-act="del">Quitar</button>' : '') + '</td></tr>';
+    }).join('');
+    $('#dipEmpty').classList.toggle('hidden', list.length > 0);
+    $('#dipCount').textContent = S.diplomas.length ? '· ' + S.diplomas.length + ' en ' + S.anio : '';
+    $('#btnDipAll').disabled = !list.length;
+  }
+  $('#dipArchCurso').addEventListener('change', renderDiplomas);
+  $('#dipArchMotivo').addEventListener('change', renderDiplomas);
+  function dipDatos(d) { return Object.assign({ nombre: d.nombre, curso: d.curso, motivo: d.motivo, fecha: d.fecha }, d.datos || {}); }
+  $('#dipTable tbody').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-act]'); if (!b) return;
+    var d = S.diplomas.filter(function (x) { return x.id === b.closest('tr').dataset.id; })[0];
+    if (b.dataset.act === 'dl') Licencia.buildDiplomas([dipDatos(d)], S.assets, printOpts()).save('Diploma_' + slug(d.nombre) + '.pdf');
+    else confirmDlg('Quitar diploma', '¿Quitar el diploma de <b>' + esc(d.nombre) + '</b> (' + esc(d.motivo) + ') del archivo?').then(function (ok) {
+      if (ok) api('deleteDiploma', { id: d.id }).then(loadDiplomas).catch(function (err) { toast(err.message, true); });
+    });
+  });
+  $('#btnDipAll').addEventListener('click', function () {
+    var l = diplomasFiltrados(); if (!l.length) return;
+    Licencia.buildDiplomas(l.map(dipDatos), S.assets, printOpts()).save('Diplomas_' + S.anio + '_' + l.length + '.pdf');
+  });
 
   /* ---------------- usuarios ---------------- */
   function loadUsersAdmin() { return api('adminListUsers').then(renderUsers).catch(function (e) { toast(e.message, true); }); }

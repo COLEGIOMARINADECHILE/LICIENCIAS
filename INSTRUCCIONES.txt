@@ -3,7 +3,7 @@ GITHUB (página web) — subir TODOS los archivos de esta carpeta
 
 Archivos de código:  index.html, app.js, licencia.js, styles.css, config.js
 Imágenes:            escudo-chile.png, escudo-chile.svg, logo-70-anios.png, insignia-color.jpg, logo-colegio.png
-Plantilla:           plantilla_estudiantes.csv
+Plantillas:          plantilla_estudiantes.csv (licencias), plantilla_diplomas.csv (diplomas: curso;nombre;run)
 
 config.js ya tiene su URL de Apps Script.
 

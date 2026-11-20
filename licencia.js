@@ -470,6 +470,70 @@
     doc.internal.write('Q');
   }
 
+  /* ======================= Diploma de Reconocimiento ======================= */
+  function drawDiploma(doc, r, assets, opts) {
+    opts = opts || {};
+    if (opts.borde !== false) marco(doc);
+    if (assets.marcaAgua) drawImageFit(doc, assets.marcaAgua, CX - 50, 96, 100, 80, 'c');
+
+    // encabezado: insignia del colegio al centro y su nombre
+    if (assets.colegio) drawImageFit(doc, assets.colegio, CX - 16, 24, 32, 30, 'c');
+    setF(doc, 'serif', 'bold', 10.5, C.navy);
+    tracked(doc, String(r.colegio || '').toUpperCase(), CX, 60, 0.7);
+
+    // título
+    setF(doc, 'serif', 'bold', 12.5, C.goldT); tracked(doc, 'DIPLOMA DE', CX, 72, 1.8);
+    setF(doc, 'title', 'bold', 34, C.navy); doc.text('Reconocimiento', CX, 86, { align: 'center' });
+    separador(doc, CX, 91.5, 58);
+
+    // otorgamiento
+    setF(doc, 'serif', 'italic', 13.5, C.ink);
+    doc.text('Se otorga el presente diploma a', CX, 104, { align: 'center' });
+    var nom = String(r.nombre || '');
+    setF(doc, 'script', 'normal', 42, C.navy); var ns = fit(doc, nom, 205, 42, 22);
+    doc.text(nom, CX, 123, { align: 'center' });
+    separador(doc, CX, 128.5, 85, 1.3);
+    if (r.curso) { setF(doc, 'serif', 'bold', 10, C.gray); tracked(doc, String(r.curso).toUpperCase(), CX, 136, 0.8); }
+
+    // motivo (hasta 2 líneas)
+    setF(doc, 'serif', 'italic', 12.5, C.ink);
+    doc.text('En reconocimiento a', CX, 147, { align: 'center' });
+    setF(doc, 'serif', 'bold', 16, C.navy);
+    var mot = String(r.motivo || ''), ms = 16;
+    var lines = doc.splitTextToSize(mot, 200);
+    while (lines.length > 2 && ms > 11) { ms -= 0.5; doc.setFontSize(ms); lines = doc.splitTextToSize(mot, 200); }
+    lines.slice(0, 2).forEach(function (l, i) { doc.text(l, CX, 155 + i * (ms * 0.45), { align: 'center' }); });
+
+    // pie: lugar y fecha / firma de la directora
+    var fyL = 182, lcx = 80, scx = 199;
+    setF(doc, 'serif', 'italic', 13, C.navy);
+    var lugar = (r.ciudad ? r.ciudad + ', ' : '') + fechaLarga(r.fecha);
+    fit(doc, lugar, 84, 13, 9);
+    doc.text(lugar, lcx, fyL - 2, { align: 'center' });
+    doc.setDrawColor.apply(doc, C.gold); doc.setLineWidth(0.3);
+    doc.line(lcx - 42, fyL, lcx + 42, fyL);
+    setF(doc, 'serif', 'bold', 7.5, C.gray); tracked(doc, 'LUGAR Y FECHA', lcx, fyL + 4.4, 0.6);
+    doc.setDrawColor.apply(doc, C.navy); doc.setLineWidth(0.35);
+    doc.line(scx - 44, fyL, scx + 44, fyL);
+    setF(doc, 'serif', 'bold', 12.5, C.navy);
+    var nd = String(r.directora || ''); fit(doc, nd, 88, 12.5, 8);
+    doc.text(nd, scx, fyL + 4.8, { align: 'center' });
+    setF(doc, 'serif', 'bold', 7.5, C.gray);
+    tracked(doc, String(r.cargo || 'Director(a) del Establecimiento').toUpperCase(), scx, fyL + 8.6, 0.45);
+  }
+
+  function buildDiplomas(records, assets, opts) {
+    var jsPDF = global.jspdf.jsPDF;
+    var doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'letter', compress: true });
+    registerFonts(doc);
+    records.forEach(function (r, i) {
+      if (i > 0) doc.addPage('letter', 'landscape');
+      conAjuste(doc, opts, function () { drawDiploma(doc, r, assets || {}, opts); });
+    });
+    finalizar(doc, 'Diplomas de Reconocimiento');
+    return doc;
+  }
+
   /* ======================= Lista de cotejo ======================= */
   // Colores por curso (mismos de la página): 4° Medio azul, 8° Básico verde
   var COLOR_CURSO = { '4M': [19, 42, 84], '8B': [24, 92, 70] };
@@ -628,6 +692,7 @@
     prepareAssets: prepareAssets,
     build: build,
     pruebaAlineacion: pruebaAlineacion,
-    listaCotejo: listaCotejo
+    listaCotejo: listaCotejo,
+    buildDiplomas: buildDiplomas
   };
 })(window);

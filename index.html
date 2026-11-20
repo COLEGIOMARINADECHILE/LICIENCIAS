@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Generador de Licencias</title>
+<title>Licencias y Diplomas</title>
 <meta name="robots" content="noindex">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Cormorant+Garamond:ital,wght@1,600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=4">
+<link rel="stylesheet" href="styles.css?v=5">
 </head>
 <body>
 
@@ -16,11 +16,11 @@
   <div class="login-hero">
     <div class="hero-inner">
       <div class="hero-logo"><img id="heroLogo" alt="Insignia del colegio"></div>
-      <p class="hero-kicker">Generador de Licencias</p>
+      <p class="hero-kicker">Generador de Licencias y Diplomas</p>
       <h1 class="hero-title" id="heroSchool">Colegio</h1>
       <div class="hero-rule"><i></i></div>
-      <p class="hero-sub">Licencias de Enseñanza Media y de Educación Básica, listas para imprimir en opalina.</p>
-      <ul class="hero-chips"><li>4° Medio</li><li>8° Básico</li><li>Archivo por curso</li></ul>
+      <p class="hero-sub">Licencias de Enseñanza Media y Educación Básica, y Diplomas de Reconocimiento para todos los cursos, listos para imprimir.</p>
+      <ul class="hero-chips"><li>4° Medio</li><li>8° Básico</li><li>Diplomas</li><li>Archivo por año</li></ul>
     </div>
   </div>
   <form class="login-card" id="loginForm" autocomplete="on">
@@ -34,7 +34,7 @@
     </label>
     <button class="btn primary block" type="submit">Ingresar</button>
     <p class="error" id="loginError"></p>
-    <p class="ver">Versión 4 · colores por curso y lista de cotejo</p>
+    <p class="ver">Versión 5 · licencias y diplomas</p>
     <p class="demo-note hidden" id="demoNote">Modo demostración: los datos se guardan solo en este navegador y se acepta cualquier clave. Configure <code>config.js</code> para usar Apps Script.</p>
   </form>
 </section>
@@ -42,13 +42,17 @@
 <!-- ============ APP ============ -->
 <section id="app" class="hidden">
   <header class="topbar">
-    <div class="brand"><img class="brand-logo" id="brandLogo" alt=""><div><b>Licencias</b><small id="brandSchool">—</small></div></div>
+    <div class="brand"><img class="brand-logo" id="brandLogo" alt=""><div><b>Licencias y Diplomas</b><small id="brandSchool">—</small></div></div>
     <nav class="tabs" id="tabs">
       <button data-view="emitir" class="active">Emitir</button>
       <button data-view="archivo">Archivo</button>
+      <button data-view="diplomas">Diplomas</button>
       <button data-view="colegio">Datos del colegio</button>
       <button data-view="usuarios" class="admin-only">Usuarios</button>
     </nav>
+    <label class="year-pick" title="Año de trabajo: cambia solo el 1 de enero; los años anteriores quedan guardados">Año
+      <select id="anio"></select>
+    </label>
     <div class="me">
       <span id="meName"></span>
       <button class="btn ghost sm" id="btnPass">Cambiar clave</button>
@@ -66,7 +70,6 @@
       <div class="seg big" data-bind="nivel">
         <button data-v="4M" class="on">4° Medio</button><button data-v="8B">8° Básico</button>
       </div>
-      <label class="inline">Año <input type="number" id="anio" min="2000" max="2100"></label>
       <span class="spacer"></span>
       <span class="muted" id="cfgHint"></span>
     </div>
@@ -148,6 +151,96 @@
       </div>
     </div>
 
+    <!-- ---------- DIPLOMAS ---------- -->
+    <div class="view hidden" id="view-diplomas">
+      <div class="dipbar">
+        <div class="course-id">
+          <span class="course-badge dip">★</span>
+          <div><small>Diplomas de Reconocimiento</small><b id="dipTitle">Todos los cursos</b></div>
+        </div>
+        <span class="spacer"></span>
+        <div class="dip-stats" id="dipStats"></div>
+      </div>
+
+      <div class="grid2">
+        <div class="card">
+          <h3>1. Cargar lista de alumnos (todos los cursos)</h3>
+          <p class="muted">Excel/CSV con columnas <b>curso</b>, <b>nombre</b> (o nombres y apellidos) y <b>run</b>. También acepta la nómina PDF de un curso. <a href="plantilla_diplomas.csv" download>Plantilla</a></p>
+          <div class="drop" id="dipDrop">
+            <input type="file" id="dipFile" accept=".pdf,.xlsx,.xls,.csv,application/pdf">
+            <span>Arrastre el archivo aquí o <u>haga clic para elegirlo</u></span>
+          </div>
+          <div id="dipImport" class="hidden">
+            <div id="dipImportInfo"></div>
+            <div class="row mt-s"><button class="btn primary" id="btnDipImport">Agregar alumnos</button><button class="btn ghost" id="btnDipCancel">Cancelar</button></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>2. Motivo y fecha del diploma</h3>
+          <div class="form-grid">
+            <label class="span2">Motivo
+              <select id="dipMotivoSel">
+                <option>Su destacada participación</option>
+                <option>Su esfuerzo y perseverancia</option>
+                <option>Su excelencia académica</option>
+                <option>Su espíritu de superación</option>
+                <option>Ser un excelente compañero(a)</option>
+                <option>Su asistencia y responsabilidad</option>
+                <option>Su compromiso con los valores del colegio</option>
+                <option value="otro">Otro motivo…</option>
+              </select>
+            </label>
+            <label class="span2 hidden" id="dipOtroWrap">Escriba el motivo<input id="dipMotivoOtro" maxlength="140" placeholder="Ej.: Su destacada participación en la Feria Científica 2026"></label>
+            <label>Fecha del diploma<input type="date" id="dipFecha"></label>
+            <div class="end"><button class="btn ghost" id="btnDipPreview" type="button">Vista previa</button></div>
+          </div>
+          <p class="muted small">El diploma lleva: nombre del alumno, curso, motivo, lugar y fecha, y nombre de la directora.</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h3>3. Seleccione los alumnos <span class="count" id="alumCount"></span></h3>
+          <div class="row">
+            <select id="dipCurso" style="width:auto"></select>
+            <input type="search" id="dipSearch" placeholder="Buscar alumno" style="width:200px">
+            <button class="btn ghost sm admin-only" id="btnDelCurso">Eliminar curso</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="tbl" id="alumTable">
+            <thead><tr><th><input type="checkbox" id="dipChkAll" title="Seleccionar los mostrados"></th><th>Nombre</th><th>Curso</th><th>R.U.N.</th><th>Diplomas</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <p class="empty hidden" id="alumEmpty">Aún no hay alumnos cargados para este año. Cargue la lista de todos los cursos.</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h3>Diplomas emitidos <span class="count" id="dipCount"></span></h3>
+          <div class="row">
+            <select id="dipArchCurso" style="width:auto"></select>
+            <select id="dipArchMotivo" style="width:auto"></select>
+            <button class="btn primary sm" id="btnDipAll">Descargar mostrados (PDF)</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="tbl" id="dipTable">
+            <thead><tr><th>Fecha</th><th>Nombre</th><th>Curso</th><th>Motivo</th><th>Emitido por</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <p class="empty hidden" id="dipEmpty">Aún no hay diplomas emitidos este año.</p>
+        </div>
+      </div>
+
+      <div class="actionbar dip-actions hidden" id="dipActionbar">
+        <span id="dipSelInfo">0 seleccionados</span>
+        <button class="btn ghost" id="btnDipClear">Limpiar selección</button>
+        <button class="btn primary" id="btnDipEmitir">Generar diplomas y guardar</button>
+      </div>
+    </div>
+
     <!-- ---------- COLEGIO ---------- -->
     <div class="view hidden" id="view-colegio">
       <form id="cfgForm" class="card">
@@ -159,7 +252,6 @@
           <label>Región<input name="region" required></label>
           <label>Provincia<input name="provincia" required></label>
           <label>Comuna<input name="comuna" required></label>
-          <label>Año escolar<input name="anioEscolar" required inputmode="numeric"></label>
         </div>
         <h3 class="mt">Firma</h3>
         <div class="form-grid three">
@@ -239,8 +331,8 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="config.js?v=4"></script>
-<script src="licencia.js?v=4"></script>
-<script src="app.js?v=4"></script>
+<script src="config.js?v=5"></script>
+<script src="licencia.js?v=5"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>

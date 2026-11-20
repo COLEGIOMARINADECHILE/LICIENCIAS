@@ -4,6 +4,9 @@ window.API_URL = 'https://script.google.com/macros/s/AKfycbyH1SWH1W2CVqH5uOzKuVb
 
 /* Imágenes por defecto de la licencia (se usan si no se sube otra en "Datos del colegio").
    Se incrustan en el PDF con su resolución original, sin recomprimir. */
+/* Nombre que aparece en la portada */
+window.COLEGIO_NOMBRE = 'Colegio Marina de Chile';
+
 window.LICENCIA_ASSETS = {
   escudo: 'escudo-chile.png',   // Escudo de la República de Chile (centro) — FIJO, no se puede cambiar
   colegio: 'logo-70-anios.png', // Insignia por defecto (izquierda y marca de agua central)

@@ -13,10 +13,19 @@
 
 <!-- ============ LOGIN ============ -->
 <section id="login" class="login hidden">
+  <div class="login-hero">
+    <div class="hero-inner">
+      <div class="hero-logo"><img id="heroLogo" alt="Insignia del colegio"></div>
+      <p class="hero-kicker">Generador de Licencias</p>
+      <h1 class="hero-title" id="heroSchool">Colegio</h1>
+      <div class="hero-rule"><i></i></div>
+      <p class="hero-sub">Licencias de Enseñanza Media y de Educación Básica, listas para imprimir en opalina.</p>
+      <ul class="hero-chips"><li>4° Medio</li><li>8° Básico</li><li>Archivo por curso</li></ul>
+    </div>
+  </div>
   <form class="login-card" id="loginForm" autocomplete="on">
-    <div class="seal">L</div>
-    <h1>Generador de Licencias</h1>
-    <p class="muted">4° Medio y 8° Básico</p>
+    <h2>Bienvenido</h2>
+    <p class="muted">Seleccione su nombre e ingrese su clave.</p>
     <label>Usuario
       <select id="loginUser" required><option value="">Cargando…</option></select>
     </label>
@@ -32,7 +41,7 @@
 <!-- ============ APP ============ -->
 <section id="app" class="hidden">
   <header class="topbar">
-    <div class="brand"><span class="seal sm">L</span><div><b>Licencias</b><small id="brandSchool">—</small></div></div>
+    <div class="brand"><img class="brand-logo" id="brandLogo" alt=""><div><b>Licencias</b><small id="brandSchool">—</small></div></div>
     <nav class="tabs" id="tabs">
       <button data-view="emitir" class="active">Emitir</button>
       <button data-view="archivo">Archivo</button>
@@ -60,14 +69,14 @@
 
       <div class="grid2">
         <div class="card">
-          <h3>1. Cargar base de datos</h3>
-          <p class="muted">Excel (.xlsx) o CSV con columnas <b>nombre</b> y <b>run</b>. Opcionales: <b>sexo</b> (F/M) y <b>registro</b>. <a href="plantilla_estudiantes.csv" download>Descargar plantilla</a></p>
+          <h3>1. Cargar lista de estudiantes</h3>
+          <p class="muted"><b>PDF “Nómina de Alumnos Licenciados”</b> del Mineduc, o Excel/CSV con columnas <b>nombre</b> y <b>run</b>. <a href="plantilla_estudiantes.csv" download>Plantilla Excel/CSV</a></p>
           <div class="drop" id="drop">
-            <input type="file" id="file" accept=".xlsx,.xls,.csv">
-            <span>Arrastre el archivo aquí o <u>haga clic para elegirlo</u></span>
+            <input type="file" id="file" accept=".pdf,.xlsx,.xls,.csv,application/pdf">
+            <span><b>PDF</b>, Excel o CSV · arrastre el archivo aquí o <u>haga clic para elegirlo</u></span>
           </div>
           <div id="importPreview" class="hidden">
-            <p id="importInfo"></p>
+            <div id="importInfo"></div>
             <div class="row"><button class="btn primary" id="btnImport">Importar estudiantes</button><button class="btn ghost" id="btnCancelImport">Cancelar</button></div>
           </div>
         </div>

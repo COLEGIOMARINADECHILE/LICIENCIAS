@@ -37,14 +37,57 @@ label.check { flex-direction: row; align-items: center; gap: 8px; font-weight: 5
 label.check input { width: auto; }
 label.check small { color: var(--muted); font-weight: 400; }
 
-/* ---------- login ---------- */
-.login { min-height: 100vh; display: grid; place-items: center; padding: 16px;
-  background: radial-gradient(1200px 600px at 20% -10%, #e7ecf5 0, transparent 60%), var(--bg); }
-.login-card { width: 100%; max-width: 380px; background: var(--card); border-radius: 16px; box-shadow: var(--shadow);
-  padding: 32px 28px; display: grid; gap: 14px; text-align: center; border-top: 4px solid var(--gold); }
-.login-card h1 { margin: 4px 0 0; font-size: 22px; color: var(--navy); }
+/* ---------- portada / login ---------- */
+.login { min-height: 100vh; display: grid; grid-template-columns: 1.15fr 1fr; background: var(--bg); }
+.login-hero { position: relative; overflow: hidden; display: grid; place-items: center; padding: 48px 32px; color: #fff;
+  background:
+    radial-gradient(circle at 50% 38%, rgba(255,255,255,.10) 0, transparent 46%),
+    repeating-radial-gradient(circle at 50% 38%, rgba(214,190,132,.10) 0 1px, transparent 1px 14px),
+    linear-gradient(160deg, #0d2550 0%, #18315c 55%, #0f2246 100%); }
+.login-hero::before, .login-hero::after { content: ''; position: absolute; inset: 14px; border: 1px solid rgba(214,190,132,.45); border-radius: 6px; pointer-events: none; }
+.login-hero::after { inset: 20px; border-color: rgba(214,190,132,.18); }
+.hero-inner { position: relative; text-align: center; max-width: 460px; }
+.hero-logo { width: 190px; height: 190px; margin: 0 auto 22px; border-radius: 50%; background: #fff; display: grid; place-items: center;
+  box-shadow: 0 0 0 6px rgba(255,255,255,.08), 0 0 0 7px #c9a85c, 0 18px 40px rgba(0,0,0,.35); animation: rise .7s ease-out both; }
+.hero-logo img { width: 84%; height: 84%; object-fit: contain; }
+.hero-kicker { margin: 0; letter-spacing: .32em; text-transform: uppercase; font-size: 12px; font-weight: 600; color: #e2c98b; animation: rise .7s .08s ease-out both; }
+.hero-title { margin: 8px 0 0; font: italic 600 44px/1.05 'Cormorant Garamond', Georgia, serif; animation: rise .7s .14s ease-out both; }
+.hero-rule { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 18px auto; width: 220px; animation: rise .7s .2s ease-out both; }
+.hero-rule::before, .hero-rule::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, transparent, #c9a85c); }
+.hero-rule::after { background: linear-gradient(90deg, #c9a85c, transparent); }
+.hero-rule i { width: 8px; height: 8px; background: #c9a85c; transform: rotate(45deg); }
+.hero-sub { margin: 0 auto; max-width: 360px; color: rgba(255,255,255,.82); line-height: 1.55; animation: rise .7s .26s ease-out both; }
+.hero-chips { list-style: none; padding: 0; margin: 22px 0 0; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; animation: rise .7s .32s ease-out both; }
+.hero-chips li { border: 1px solid rgba(226,201,139,.55); color: #f1e3bf; border-radius: 99px; padding: 5px 12px; font-size: 12.5px; font-weight: 600; }
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } }
+@media (prefers-reduced-motion: reduce) { .hero-logo, .hero-kicker, .hero-title, .hero-rule, .hero-sub, .hero-chips { animation: none; } }
+
+.login-card { align-self: center; justify-self: center; width: 100%; max-width: 380px; margin: 32px 16px; background: var(--card); border-radius: 16px; box-shadow: var(--shadow);
+  padding: 34px 30px; display: grid; gap: 14px; border-top: 4px solid var(--gold); }
+.login-card h2 { margin: 0; font: italic 600 30px 'Cormorant Garamond', Georgia, serif; color: var(--navy); }
 .login-card .muted { margin: -8px 0 6px; }
-.login-card label { text-align: left; }
+.brand-logo { width: 40px; height: 40px; object-fit: contain; border-radius: 50%; background: #fff; box-shadow: 0 0 0 2px var(--gold-soft), 0 0 0 3px var(--gold); }
+
+@media (max-width: 860px) {
+  .login { grid-template-columns: 1fr; }
+  .login-hero { padding: 40px 20px 36px; }
+  .hero-logo { width: 130px; height: 130px; margin-bottom: 14px; }
+  .hero-title { font-size: 34px; }
+  .hero-chips { display: none; }
+  .login-card { margin: -18px auto 32px; width: calc(100% - 32px); position: relative; }
+}
+
+/* vista previa de importación */
+.imp-head { line-height: 1.6; }
+.mt-s { margin-top: 10px; }
+.small { font-size: 12.5px; margin: 6px 0 10px; }
+.kvs { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+.kv { background: #f4f1e8; border-radius: 8px; padding: 4px 9px; font-size: 12.5px; font-weight: 600; color: var(--navy); }
+.kv small { display: block; font-weight: 500; color: var(--muted); font-size: 10.5px; }
+.imp-list { margin: 10px 0; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font-size: 13px; }
+.imp-list div { padding: 3px 0; }
+.imp-list span { display: inline-block; min-width: 34px; font-weight: 700; color: var(--navy); }
+.imp-list small { color: var(--muted); }
 .seal { width: 56px; height: 56px; margin: 0 auto; border-radius: 50%; display: grid; place-items: center;
   background: var(--navy); color: #fff; font: italic 600 30px 'Cormorant Garamond', Georgia, serif; box-shadow: 0 0 0 4px var(--gold-soft), 0 0 0 5px var(--gold); }
 .seal.sm { width: 34px; height: 34px; font-size: 19px; margin: 0; box-shadow: 0 0 0 2px var(--gold-soft), 0 0 0 3px var(--gold); }

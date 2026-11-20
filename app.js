@@ -32,6 +32,7 @@
     if (isNaN(x)) return 1; if (isNaN(y)) return -1;
     return x - y || a.nombre.localeCompare(b.nombre);
   }
+  function penBtn() { return ' <button class="pen" data-act="nom" title="Corregir el nombre" aria-label="Corregir el nombre">✎</button>'; }
   function pick(o, keys) { var r = {}; keys.forEach(function (k) { if (o[k]) r[k] = o[k]; }); return r; }
   function norm(s) { return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
 
@@ -165,6 +166,13 @@
           .sort(function (a, b) { return String(b.emitido).localeCompare(String(a.emitido)) || a.nombre.localeCompare(b.nombre); });
       },
       deleteDiploma: function (d, q) { d.dips = (d.dips || []).filter(function (x) { return x.id !== q.id; }); return true; },
+      updateAlumno: function (d, q) { var a = (d.alumnos || []).filter(function (x) { return x.id === q.id; })[0]; Object.assign(a, q.alumno); return true; },
+      renombrarDocumento: function (d, q) {
+        var dip = q.tipo === 'diploma', r = (dip ? d.dips : d.lic).filter(function (x) { return x.id === q.id; })[0];
+        r.nombre = q.nombre; r.datos = Object.assign({}, r.datos, { nombre: q.nombre });
+        if (q.enLista) (dip ? d.alumnos : d.students).forEach(function (x) { if (x.id === (dip ? r.alumnoId : r.studentId)) x.nombre = q.nombre; });
+        return true;
+      },
       marcarImpresa: function (d, q) {
         d.lic.forEach(function (l) { if ((q.ids || []).indexOf(l.id) >= 0) l.impresa = !!q.impresa; }); return true;
       },
@@ -225,7 +233,8 @@
     $('#meName').textContent = user.nombre;
     $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
     aplicarCurso();
-    return loadConfig().then(function () { renderAnios(); return loadStudents(); });
+    irA('inicio');
+    return loadConfig().then(function () { renderAnios(); resumenInicio(); return loadStudents(); });
   }
 
   /* ---------------- año de trabajo ----------------
@@ -245,7 +254,8 @@
   }
   function cambiarAnio(a) {
     S.anio = String(a); renderAnios(); recargarCurso(); refreshAssets();
-    if (S.view === 'diplomas') loadDiplomas();
+    if (S.view === 'diplomas' || S.view === 'dipArchivo') loadDiplomas();
+    if (S.view === 'inicio') resumenInicio();
   }
   $('#anio').addEventListener('change', function () {
     if (this.value !== 'nuevo') return cambiarAnio(this.value);
@@ -261,22 +271,58 @@
   });
 
   /* ---------------- navegación ---------------- */
-  S.view = 'emitir'; S.archFiltro = 'todas';
+  /* Dos módulos separados: Licencias (lic) y Diplomas (dip). Cada uno con sus pestañas, datos y colores.
+     "Datos del colegio" y "Usuarios" son comunes y se muestran dentro del módulo activo. */
+  S.view = 'inicio'; S.archFiltro = 'todas'; S.modulo = '';
+  var VISTA_MOD = { emitir: 'lic', archivo: 'lic', diplomas: 'dip', dipArchivo: 'dip' };
+  function irModulo(mod) {
+    S.modulo = mod;
+    try { localStorage.setItem('lic_modulo', mod); } catch (e) {}
+    irA(mod === 'dip' ? 'diplomas' : 'emitir');
+  }
+  function irA(view) {
+    if (VISTA_MOD[view]) S.modulo = VISTA_MOD[view];
+    S.view = view;
+    var enInicio = view === 'inicio', dip = S.modulo === 'dip' && !enInicio;
+    document.body.classList.toggle('en-inicio', enInicio);
+    document.body.classList.toggle('modo-dip', dip);
+    $$('#modswitch button').forEach(function (x) { x.classList.toggle('on', !enInicio && x.dataset.mod === S.modulo); });
+    $$('#tabs button').forEach(function (x) {
+      x.classList.toggle('hidden', enInicio || (x.dataset.mod && x.dataset.mod !== S.modulo) || false);
+      x.classList.toggle('active', x.dataset.view === view);
+    });
+    $('#brandTitle').textContent = enInicio ? 'Licencias y Diplomas' : dip ? 'Diplomas' : 'Licencias';
+    $$('.view').forEach(function (v) { v.classList.toggle('hidden', v.id !== 'view-' + view); });
+    $('.actionbar').classList.toggle('hidden', view !== 'emitir');
+    // el curso activo (4° Medio / 8° Básico) es solo de Licencias
+    $('#coursebar').classList.toggle('hidden', view !== 'emitir' && view !== 'archivo');
+    if (view === 'archivo') loadArchivo();
+    if (view === 'diplomas' || view === 'dipArchivo') loadDiplomas();
+    if (view !== 'diplomas') $('#dipActionbar').classList.add('hidden'); else updDipSel();
+    if (view === 'usuarios') loadUsersAdmin();
+    if (view === 'colegio') fillConfigForm();
+    if (enInicio) resumenInicio();
+    window.scrollTo(0, 0);
+  }
+  function resumenInicio() {
+    Promise.all([api('listStudents', { nivel: '4M', anio: S.anio }), api('listStudents', { nivel: '8B', anio: S.anio }), api('listAlumnos', { anio: S.anio })])
+      .then(function (r) {
+        var lic = r[0].length + r[1].length, em = r[0].concat(r[1]).filter(function (s) { return s.emitida; }).length;
+        var dips = r[2].reduce(function (n, a) { return n + (a.diplomas || 0); }, 0);
+        $('#homeLic').textContent = lic ? S.anio + ': ' + lic + ' estudiantes · ' + em + ' licencias emitidas →' : 'Entrar →';
+        $('#homeDip').textContent = r[2].length ? S.anio + ': ' + r[2].length + ' alumnos · ' + dips + ' diplomas →' : 'Entrar →';
+      }).catch(function () {});
+  }
   $('#tabs').addEventListener('click', function (e) {
-    var b = e.target.closest('button[data-view]'); if (!b) return;
-    S.view = b.dataset.view;
-    $$('#tabs button').forEach(function (x) { x.classList.toggle('active', x === b); });
-    $$('.view').forEach(function (v) { v.classList.toggle('hidden', v.id !== 'view-' + S.view); });
-    $('.actionbar').classList.toggle('hidden', S.view !== 'emitir');
-    // el curso activo solo aplica a Emitir y Archivo
-    $('#coursebar').classList.toggle('hidden', S.view !== 'emitir' && S.view !== 'archivo');
-    document.body.classList.toggle('modo-dip', S.view === 'diplomas');
-    if (S.view === 'archivo') loadArchivo();
-    if (S.view === 'diplomas') loadDiplomas();
-    else $('#dipActionbar').classList.add('hidden');
-    if (S.view === 'usuarios') loadUsersAdmin();
-    if (S.view === 'colegio') fillConfigForm();
+    var b = e.target.closest('button[data-view]'); if (b) irA(b.dataset.view);
   });
+  $('#modswitch').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-mod]'); if (b) irModulo(b.dataset.mod);
+  });
+  $('#view-inicio').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-go]'); if (b) irModulo(b.dataset.go);
+  });
+  $('.brand').addEventListener('click', function () { irA('inicio'); });
 
   $$('.seg').forEach(function (seg) {
     seg.addEventListener('click', function (e) {
@@ -407,7 +453,7 @@
       var dup = s.registro && regs[s.registro] > 1;
       return '<tr data-id="' + esc(s.id) + '">' +
         '<td><input type="checkbox" class="sel"' + (S.selected[s.id] ? ' checked' : '') + '></td>' +
-        '<td class="name">' + esc(s.nombre) + '</td>' +
+        '<td class="name">' + esc(s.nombre) + penBtn() + '</td>' +
         '<td>' + esc(runFormat(s.run)) + (runValid(s.run) ? '' : '<span class="badrun">R.U.N. no válido</span>') + '</td>' +
         '<td><input class="reg' + (dup ? ' dup' : '') + '" value="' + esc(s.registro) + '" inputmode="numeric" title="' + (dup ? 'N° repetido' : '') + '"></td>' +
         '<td>' + (s.emitida ? '<span class="chip ok">Emitida ' + esc(fmtDate(s.emitida).split(' ')[0]) + '</span>' : '<span class="chip pend">Pendiente</span>') + '</td>' +
@@ -453,7 +499,13 @@
   $('#studTable tbody').addEventListener('click', function (e) {
     var b = e.target.closest('button[data-act]'); if (!b) return;
     var s = S.students.filter(function (x) { return x.id === b.closest('tr').dataset.id; })[0];
-    if (b.dataset.act === 'pdf') {
+    if (b.dataset.act === 'nom') {
+      dlgNombre('Corregir nombre', s.nombre, { nota: s.emitida ? 'Esta licencia ya fue emitida: vuelva a generarla para que salga con el nombre corregido (o corríjalo en el Archivo).' : '' }).then(function (v) {
+        if (!v) return;
+        api('updateStudent', { id: s.id, student: { nombre: v.nombre } }).then(loadStudents).then(function () { toast('Nombre corregido'); })
+          .catch(function (err) { toast(err.message, true); });
+      });
+    } else if (b.dataset.act === 'pdf') {
       if (!s.registro) return toast('Ingrese el N° de registro primero', true);
       emitir([s.id], 'download');
     } else if (b.dataset.act === 'del') {
@@ -503,36 +555,72 @@
   var drop = $('#drop');
   ['dragover', 'dragenter'].forEach(function (ev) { drop.addEventListener(ev, function () { drop.classList.add('over'); }); });
   ['dragleave', 'drop'].forEach(function (ev) { drop.addEventListener(ev, function () { drop.classList.remove('over'); }); });
-  $('#file').addEventListener('change', function () { if (this.files[0]) parseFile(this.files[0]); this.value = ''; });
+  $('#file').addEventListener('change', function () { if (this.files.length) parseFiles(Array.prototype.slice.call(this.files)); this.value = ''; });
 
   // Detecta PDF por su contenido (los PDF empiezan con "%PDF"), aunque el nombre no termine en .pdf
-  function parseFile(file) {
-    file.slice(0, 5).arrayBuffer().then(function (b) {
-      var head = String.fromCharCode.apply(null, new Uint8Array(b));
-      parseFileTipo(file, head.indexOf('%PDF') === 0 || /\.pdf$/i.test(file.name) || file.type === 'application/pdf');
-    }).catch(function () { parseFileTipo(file, /\.pdf$/i.test(file.name)); });
+  function esPdfFile(file) {
+    return file.slice(0, 5).arrayBuffer().then(function (b) {
+      return String.fromCharCode.apply(null, new Uint8Array(b)).indexOf('%PDF') === 0 || /\.pdf$/i.test(file.name) || file.type === 'application/pdf';
+    }).catch(function () { return /\.pdf$/i.test(file.name); });
+  }
+  /* Lee un archivo (PDF Mineduc/SIGE, Excel o CSV) -> { students, meta, cursos[] }.
+     Excel: lee todas las hojas; si hay varias, el nombre de la hoja sirve como curso. */
+  function leerArchivo(file) {
+    return esPdfFile(file).then(function (pdf) {
+      if (pdf) return file.arrayBuffer().then(parsePdf).then(function (r) {
+        r.students.forEach(function (s) { s.curso = r.meta.curso || ''; });
+        return r;
+      });
+      var isCsv = /\.csv$/i.test(file.name);
+      return (isCsv ? file.text().then(function (t) { return XLSX.read(t.replace(/^﻿/, ''), { type: 'string', raw: true }); })
+        : file.arrayBuffer().then(function (b) { return XLSX.read(b, { type: 'array' }); })).then(function (wb) {
+        var out = [];
+        wb.SheetNames.forEach(function (sn) {
+          mapRows(XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: '', raw: false })).forEach(function (s) {
+            if (!s.curso && wb.SheetNames.length > 1) s.curso = sn;
+            out.push(s);
+          });
+        });
+        return { students: out, meta: null };
+      });
+    });
+  }
+  /* Varios archivos a la vez (p. ej. las Listas de Curso de 4° A, 4° B y 4° C): se juntan en el orden elegido */
+  function leerArchivos(files) {
+    files = files.slice().sort(function (a, b) { return a.name.localeCompare(b.name, 'es', { numeric: true }); });
+    var all = [], meta = null;
+    return files.reduce(function (p, f) {
+      return p.then(function () { return leerArchivo(f); }).then(function (r) {
+        all = all.concat(r.students);
+        if (r.meta) meta = Object.assign({}, r.meta, meta || {}); // los datos del primer archivo mandan
+      });
+    }, Promise.resolve()).then(function () {
+      return { students: all, meta: meta, nombre: files.length === 1 ? files[0].name : files.length + ' archivos' };
+    });
   }
 
-  function parseFileTipo(file, esPdf) {
-    if (esPdf) {
-      busy(true, 'Leyendo la nómina PDF…');
-      file.arrayBuffer().then(parsePdf).then(function (r) {
-        if (!r.students.length) throw new Error('No se encontraron estudiantes en el PDF. ¿Es la "Nómina de Alumnos Licenciados" del Mineduc?');
-        if (r.meta.nivel && r.meta.nivel !== S.nivel) setNivel(r.meta.nivel);
-        if (r.meta.anio && r.meta.anio !== S.anio) cambiarAnio(r.meta.anio);
-        showPreview(r.students, file.name, r.meta);
-      }).catch(function (e) { toast(e.message || 'No se pudo leer el PDF', true); }).then(function () { busy(false); });
-      return;
-    }
-    var isCsv = /\.csv$/i.test(file.name);
-    var p = isCsv ? file.text().then(function (t) { return XLSX.read(t.replace(/^﻿/, ''), { type: 'string', raw: true }); })
-      : file.arrayBuffer().then(function (b) { return XLSX.read(b, { type: 'array' }); });
-    p.then(function (wb) {
-      var rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '', raw: false });
-      var out = mapRows(rows);
-      if (!out.length) throw new Error('No se encontraron estudiantes en el Excel/CSV. Revise que exista una columna "nombre" (o suba la nómina en PDF).');
-      showPreview(out, file.name, null);
-    }).catch(function (e) { toast(e.message || 'No se pudo leer el archivo', true); });
+  function parseFiles(files) {
+    busy(true, 'Leyendo ' + (files.length > 1 ? files.length + ' archivos' : 'el archivo') + '…');
+    leerArchivos(files).then(function (r) {
+      if (!r.students.length) throw new Error('No se encontraron estudiantes. Suba la "Nómina de Alumnos Licenciados", la "Lista de Curso" del SIGE, o un Excel/CSV con columna "nombre".');
+      if (r.meta && r.meta.nivel && r.meta.nivel !== S.nivel) setNivel(r.meta.nivel);
+      if (r.meta && r.meta.anio && r.meta.anio !== S.anio) cambiarAnio(r.meta.anio);
+      showPreview(r.students, r.nombre, r.meta);
+    }).catch(function (e) { toast(e.message || 'No se pudo leer el archivo', true); }).then(function () { busy(false); });
+  }
+
+  // Opción de la vista previa: "Nombres Apellidos" (recomendado) o tal como viene en la lista
+  function ordenNombresHtml(list, grp) {
+    var inv = list.filter(function (s) { return s.invertido; });
+    if (!inv.length) return '';
+    return '<div class="name-order"><b>Los nombres vienen como APELLIDOS NOMBRES.</b> ¿Cómo deben aparecer en el documento?' +
+      '<label class="check"><input type="radio" name="' + grp + '" value="nom" checked> Nombres y luego apellidos <small>(' + esc(inv[0].nombre) + ')</small></label>' +
+      '<label class="check"><input type="radio" name="' + grp + '" value="ape"> Tal como viene <small>(' + esc(inv[0].original) + ')</small></label>' +
+      '<small class="muted">Si algún nombre queda mal ordenado, corríjalo después con el lápiz ✎.</small></div>';
+  }
+  function aplicarOrden(list, grp) {
+    var r = $('input[name="' + grp + '"]:checked'), ape = r && r.value === 'ape';
+    return list.map(function (s) { return Object.assign({}, s, { nombre: ape && s.original ? s.original : s.nombre }); });
   }
 
   function setNivel(n) {
@@ -557,9 +645,14 @@
         return '<span class="kv"><small>' + c[1] + '</small>' + esc(v) + '</span>';
       }).join('');
     }
+    var cursos = cursosDe(out);
+    var otroCurso = meta && meta.nivelCurso === 'otro';
     $('#importInfo').innerHTML =
       '<div class="imp-head"><b>' + out.length + '</b> estudiantes detectados en <i>' + esc(fileName) + '</i><br>Se agregarán a <b>' +
       Licencia.NIVELES[S.nivel].curso + ' ' + esc(S.anio) + '</b>' + (malos ? ' <span class="chip warn">' + malos + ' con R.U.N. a revisar</span>' : '') + '</div>' +
+      (cursos.length ? '<div class="kvs mt-s">' + cursos.map(function (c) { return '<span class="kv"><small>' + c[1] + ' estudiantes</small>' + esc(c[0]) + '</span>'; }).join('') + '</div>' : '') +
+      (otroCurso ? '<p class="chip warn mt-s">Esta lista es de ' + esc(meta.curso) + ': las licencias son solo para 4° Medio y 8° Básico. Para diplomas use el módulo Diplomas.</p>' : '') +
+      ordenNombresHtml(out, 'ordenLic') +
       '<label class="inline mt-s">N° de registro inicial <input type="number" id="regIni" min="1" value="' + firstN + '" style="width:90px"></label>' +
       '<p class="muted small">Se numeran en el <b>mismo orden de la lista</b> (' + esc(out[0].nombre) + ' = ' + firstN + ', …). Después puede editar cualquier número.</p>' +
       (cfgRows ? '<div class="kvs">' + cfgRows + '</div><label class="check"><input type="checkbox" id="updCfg" checked> Usar estos datos en "Datos del colegio"</label>' : '') +
@@ -618,13 +711,25 @@
       var tc = function (s) { return titleCase(String(s || '').replace(/\s+/g, ' ').trim()); };
       lines.forEach(function (l, li) {
         var t = l.text;
-        // datos del encabezado ("Etiqueta:" seguida de su valor)
+        // datos del encabezado ("Etiqueta:" seguida de su valor, o "Etiqueta" | ": valor" en la Lista de Curso SIGE)
         l.cells.forEach(function (c, i) {
-          var m = /^([A-Za-zÁÉÍÓÚáéíóúñÑ\/ ]+):\s*(.*)$/.exec(c);
+          var m = /^([A-Za-zÁÉÍÓÚáéíóúñÑ\/ ]+?)\s*:\s*(.*)$/.exec(c);
+          if (!m && /^[A-Za-zÁÉÍÓÚáéíóúñÑ\/ ]{3,30}$/.test(c) && /^:/.test(l.cells[i + 1] || '')) m = [c, c, l.cells[i + 1].replace(/^:\s*/, '')];
           if (!m) return;
-          var key = norm(m[1]), val = (m[2] || l.cells[i + 1] || '').trim();
+          var key = norm(m[1]), val = (m[2] || (/:$/.test(c) ? l.cells[i + 1] : '') || '').trim();
           if (!val || /:$/.test(val)) return;
-          if (key === 'establecimiento') meta.colegio = tc(val);
+          if (key === 'establecimiento') {
+            var rb = /^(\d{3,6}(?:-[\dkK])?)\s+(.+)$/.exec(val); // "4531 COLEGIO MARINA DE CHILE"
+            if (rb) { meta.rbd = meta.rbd || rb[1]; val = rb[2]; }
+            meta.colegio = tc(val);
+          }
+          else if (key === 'curso') {
+            var g = /(\d{1,2})\s*°?\s*(?:a[ñn]o\s+)?(medio|b[áa]sico)\s*([A-Z])?\b/i.exec(val);
+            if (g) {
+              meta.curso = g[1] + '° ' + (/^m/i.test(g[2]) ? 'Medio' : 'Básico') + (g[3] ? ' ' + g[3].toUpperCase() : '');
+              meta.nivelCurso = g[1] === '4' && /^m/i.test(g[2]) ? '4M' : g[1] === '8' && /^b/i.test(g[2]) ? '8B' : 'otro';
+            }
+          }
           else if (key === 'region') meta.region = tc(val.replace(/^(DE LA|DEL|DE)\s+/i, ''));
           else if (key === 'comuna') { meta.comuna = tc(val); meta.ciudad = meta.ciudad || tc(val); }
           else if (key === 'rbd') meta.rbd = val;
@@ -650,8 +755,13 @@
           var apellidos = r >= 3 ? l.cells.slice(1, r - 1).join(' ') : '';
           var nombres = r >= 3 ? l.cells[r - 1] : l.cells[1];
           students.push({ nombre: (tc(nombres) + ' ' + tc(apellidos)).trim(), run: runFormat(l.cells[r]), sexo: '', registro: l.cells[0] });
+        } else if (r === 1 && /^\d{1,3}$/.test(l.cells[0]) && l.cells[2] && /[A-Za-zÁÉÍÓÚÑ]/.test(l.cells[2])) {
+          // Lista de Curso SIGE: N/L | RUN | APELLIDOS NOMBRES | Edad | … (el N/L es solo el orden de lista, no el registro)
+          var orig = String(l.cells[2]).replace(/\s+/g, ' ').trim();
+          students.push({ nombre: nombreDesdeApellidos(orig), original: tc(orig), invertido: true, run: runFormat(l.cells[1]), sexo: '', registro: '' });
         }
       });
+      if (meta.nivelCurso) { meta.nivel = meta.nivelCurso === 'otro' ? '' : meta.nivelCurso; }
       return { students: students, meta: meta };
     });
   }
@@ -691,6 +801,18 @@
       };
     }).filter(function (s) { return s.nombre; });
   }
+  /* "ACUÑA BUSTOS AGUSTÍN ALFONSO" -> "Agustín Alfonso Acuña Bustos".
+     Toma los dos primeros apellidos (respetando partículas: DE LA, DEL, SAN, VAN…); el resto son los nombres.
+     Si algún caso sale mal (apellidos compuestos poco comunes), se corrige con el lápiz ✎. */
+  function nombreDesdeApellidos(s) {
+    var w = String(s || '').replace(/\s+/g, ' ').trim().split(' ');
+    var PART = { DE: 1, DEL: 1, LA: 1, LAS: 1, LOS: 1, SAN: 1, SANTA: 1, VAN: 1, VON: 1, DA: 1, DI: 1, MC: 1, MAC: 1, LE: 1 };
+    function apellido(i) { var j = i; while (j < w.length - 1 && PART[w[j].toUpperCase()]) j++; return j + 1; }
+    if (w.length < 3) return titleCase(w.slice(1).concat(w.slice(0, 1)).join(' '));
+    var a1 = apellido(0), a2 = a1 < w.length - 1 ? apellido(a1) : a1;
+    if (a2 >= w.length) a2 = a1; // no dejar sin nombre de pila
+    return titleCase(w.slice(a2).concat(w.slice(0, a2)).join(' '));
+  }
   // Solo corrige nombres escritos completamente en MAYÚSCULAS o minúsculas
   function titleCase(s) {
     if (s !== s.toUpperCase() && s !== s.toLowerCase()) return s;
@@ -705,7 +827,7 @@
     var P = S.pendingImport; if (!P) return;
     var ini = parseInt($('#regIni') && $('#regIni').value, 10); if (!(ini > 0)) ini = P.firstN;
     // N° correlativo en el orden de la lista; respeta saltos de la nómina y los N° no numéricos del archivo
-    var students = P.students.map(function (s, i) {
+    var students = aplicarOrden(P.students, 'ordenLic').map(function (s, i) {
       var reg = /^\d+$/.test(s.registro) ? String(ini + Number(s.registro) - P.firstN)
         : s.registro ? s.registro : String(ini + i);
       return Object.assign({}, s, { registro: reg });
@@ -795,7 +917,7 @@
       var ok = esImpresa(l);
       return '<tr data-id="' + esc(l.id) + '" class="' + (ok ? 'row-ok' : '') + '">' +
         '<td><label class="tick"><input type="checkbox" class="imp"' + (ok ? ' checked' : '') + '><span></span></label></td>' +
-        '<td><b>' + esc(l.registro) + '</b></td><td class="name">' + esc(l.nombre) + '</td><td>' + esc(runFormat(l.run)) +
+        '<td><b>' + esc(l.registro) + '</b></td><td class="name">' + esc(l.nombre) + penBtn() + '</td><td>' + esc(runFormat(l.run)) +
         '</td><td>' + esc(fmtDate(l.emitida)) + '</td><td>' + esc(l.emitidaPor) + '</td><td class="actions"><button class="link" data-act="dl">Descargar PDF</button>' +
         (S.user.rol === 'admin' ? '<button class="link danger" data-act="del">Quitar</button>' : '') + '</td></tr>';
     }).join('');
@@ -830,12 +952,28 @@
       nivel: S.nivel, anio: S.anio, colegio: S.config.colegio, rbd: S.config.rbd, filtro: filtro, usuario: S.user.nombre
     }, S.assets).save('Lista_cotejo_' + (S.nivel === '8B' ? '8Basico' : '4Medio') + '_' + S.anio + '.pdf');
   });
+  /* Corrige el nombre impreso en una licencia o diploma ya guardado (doc = registro del archivo) */
+  function renombrar(tipo, doc, lista, recargar, despues) {
+    dlgNombre('Corregir nombre en ' + (tipo === 'diploma' ? 'el diploma' : 'la licencia'), doc.nombre, { lista: lista }).then(function (v) {
+      if (!v || v.nombre === doc.nombre && !v.enLista) return;
+      busy(true, 'Guardando…');
+      api('renombrarDocumento', { tipo: tipo, id: doc.id, nombre: v.nombre, enLista: v.enLista }).then(function () {
+        doc.nombre = v.nombre; doc.datos = Object.assign({}, doc.datos, { nombre: v.nombre });
+        busy(false); toast('Nombre corregido');
+        recargar();
+        return despues && despues();
+      }).catch(function (e) { busy(false); toast(e.message, true); });
+    });
+  }
   // Re-descarga: usa los datos guardados al emitir (misma fecha, directora y colegio)
   function licRecords(list) { return list.map(function (l) { var d = Object.assign({}, l.datos); d.run = runFormat(d.run); return d; }); }
   $('#archTable tbody').addEventListener('click', function (e) {
     var b = e.target.closest('button[data-act]'); if (!b) return;
     var l = S.licencias.filter(function (x) { return x.id === b.closest('tr').dataset.id; })[0];
-    if (b.dataset.act === 'dl') savePdf(licRecords([l]));
+    if (b.dataset.act === 'nom') renombrar('licencia', l, 'estudiantes de ' + Licencia.NIVELES[S.nivel].curso, function () { loadArchivo(); loadStudents(); }, function () {
+      return confirmDlg('Nombre corregido', '¿Descargar ahora la licencia de <b>' + esc(l.nombre) + '</b> con el nombre corregido?').then(function (ok) { if (ok) savePdf(licRecords([l])); });
+    });
+    else if (b.dataset.act === 'dl') savePdf(licRecords([l]));
     else confirmDlg('Quitar del archivo', '¿Quitar la licencia de <b>' + esc(l.nombre) + '</b> del archivo?').then(function (ok) {
       if (ok) api('deleteLicencia', { id: l.id }).then(loadArchivo).catch(function (err) { toast(err.message, true); });
     });
@@ -851,6 +989,7 @@
   function loadDiplomas() {
     var anio = S.anio;
     $('#dipTitle').textContent = 'Todos los cursos · ' + anio;
+    $('#dipTitle2').textContent = 'Diplomas emitidos · ' + anio;
     return Promise.all([api('listAlumnos', { anio: anio }), api('listDiplomas', { anio: anio })]).then(function (r) {
       if (anio !== S.anio) return;
       S.alumnos = r[0]; S.diplomas = r[1];
@@ -875,14 +1014,14 @@
     var list = alumnosFiltrados();
     $('#alumTable tbody').innerHTML = list.map(function (a) {
       return '<tr data-id="' + esc(a.id) + '" class="' + (S.dipSel[a.id] ? 'row-sel' : '') + '"><td><input type="checkbox" class="dsel"' + (S.dipSel[a.id] ? ' checked' : '') + '></td>' +
-        '<td class="name">' + esc(a.nombre) + '</td><td><span class="chip curso">' + esc(a.curso) + '</span></td><td>' + esc(runFormat(a.run)) + '</td>' +
+        '<td class="name">' + esc(a.nombre) + penBtn() + '</td><td><span class="chip curso">' + esc(a.curso) + '</span></td><td>' + esc(runFormat(a.run)) + '</td>' +
         '<td>' + (a.diplomas ? '<span class="chip ok">' + a.diplomas + ' diploma' + (a.diplomas > 1 ? 's' : '') + '</span>' : '<span class="muted">—</span>') + '</td>' +
-        '<td class="actions"><button class="link danger" data-act="del">Quitar</button></td></tr>';
+        '<td class="actions"><button class="link" data-act="edit">Editar</button><button class="link danger" data-act="del">Quitar</button></td></tr>';
     }).join('');
     $('#alumEmpty').classList.toggle('hidden', list.length > 0);
     $('#alumEmpty').textContent = S.alumnos.length ? 'No hay alumnos con este filtro.' : 'Aún no hay alumnos cargados para ' + S.anio + '. Cargue la lista de todos los cursos.';
     $('#alumCount').textContent = S.alumnos.length ? '· ' + S.alumnos.length + ' alumnos en ' + cursos.length + ' cursos' : '';
-    $('#dipStats').innerHTML = '<span><b>' + S.alumnos.length + '</b> alumnos</span><span><b>' + cursos.length + '</b> cursos</span><span><b>' + S.diplomas.length + '</b> diplomas</span>';
+    $('#dipStats').innerHTML = $('#dipStats2').innerHTML = '<span><b>' + S.alumnos.length + '</b> alumnos</span><span><b>' + cursos.length + '</b> cursos</span><span><b>' + S.diplomas.length + '</b> diplomas</span>';
     updDipSel();
   }
   function alumnosFiltrados() {
@@ -911,8 +1050,20 @@
     tr.classList.toggle('row-sel', e.target.checked); updDipSel();
   });
   $('#alumTable tbody').addEventListener('click', function (e) {
-    var b = e.target.closest('button[data-act="del"]'); if (!b) return;
+    var b = e.target.closest('button[data-act]'); if (!b) return;
     var a = S.alumnos.filter(function (x) { return x.id === b.closest('tr').dataset.id; })[0];
+    var guardar = function (patch) {
+      return api('updateAlumno', { id: a.id, alumno: patch }).then(loadDiplomas).then(function () { toast('Alumno actualizado'); })
+        .catch(function (err) { toast(err.message, true); });
+    };
+    if (b.dataset.act === 'nom') return dlgNombre('Corregir nombre', a.nombre, {
+      nota: a.diplomas ? 'Los diplomas ya emitidos se corrigen desde "Diplomas emitidos" (lápiz ✎ junto al nombre).' : ''
+    }).then(function (v) { if (v) guardar({ nombre: v.nombre }); });
+    if (b.dataset.act === 'edit') return formDlg('Editar alumno', [
+      { name: 'nombre', label: 'Nombre completo (como saldrá en el diploma)', value: a.nombre, required: true },
+      { name: 'curso', label: 'Curso', value: a.curso, required: true },
+      { name: 'run', label: 'R.U.N.', value: runFormat(a.run) }
+    ]).then(function (v) { if (v) { v.run = v.run ? runFormat(v.run) : ''; guardar(v); } });
     confirmDlg('Quitar alumno', '¿Quitar a <b>' + esc(a.nombre) + '</b> de la lista? Sus diplomas ya emitidos se mantienen en el archivo.').then(function (ok) {
       if (ok) api('deleteAlumno', { id: a.id }).then(loadDiplomas).catch(function (err) { toast(err.message, true); });
     });
@@ -929,45 +1080,31 @@
   var dDrop = $('#dipDrop');
   ['dragover', 'dragenter'].forEach(function (ev) { dDrop.addEventListener(ev, function () { dDrop.classList.add('over'); }); });
   ['dragleave', 'drop'].forEach(function (ev) { dDrop.addEventListener(ev, function () { dDrop.classList.remove('over'); }); });
-  $('#dipFile').addEventListener('change', function () { if (this.files[0]) leerListaDiplomas(this.files[0]); this.value = ''; });
+  $('#dipFile').addEventListener('change', function () { if (this.files.length) leerListaDiplomas(Array.prototype.slice.call(this.files)); this.value = ''; });
 
-  function leerListaDiplomas(file) {
-    file.slice(0, 5).arrayBuffer().then(function (b) {
-      var esPdf = String.fromCharCode.apply(null, new Uint8Array(b)).indexOf('%PDF') === 0 || /\.pdf$/i.test(file.name);
-      if (esPdf) {
-        busy(true, 'Leyendo PDF…');
-        return file.arrayBuffer().then(parsePdf).then(function (r) {
-          var cursoPdf = r.meta.nivel === '8B' ? '8° Básico' : r.meta.nivel === '4M' ? '4° Medio' : '';
-          return r.students.map(function (s) { return { nombre: s.nombre, run: s.run, curso: cursoPdf }; });
-        }).then(function (l) { busy(false); return l; }, function (e) { busy(false); throw e; });
-      }
-      var isCsv = /\.csv$/i.test(file.name);
-      return (isCsv ? file.text().then(function (t) { return XLSX.read(t.replace(/^﻿/, ''), { type: 'string', raw: true }); })
-        : file.arrayBuffer().then(function (bb) { return XLSX.read(bb, { type: 'array' }); })).then(function (wb) {
-        // lee TODAS las hojas (algunos colegios tienen una hoja por curso; el nombre de la hoja sirve como curso)
-        var out = [];
-        wb.SheetNames.forEach(function (sn) {
-          mapRows(XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: '', raw: false })).forEach(function (s) {
-            out.push({ nombre: s.nombre, run: s.run, curso: s.curso || (wb.SheetNames.length > 1 ? sn : '') });
-          });
-        });
-        return out;
+  // Acepta varios archivos a la vez: Listas de Curso SIGE (una por curso), nóminas PDF, Excel o CSV
+  function leerListaDiplomas(files) {
+    busy(true, 'Leyendo ' + (files.length > 1 ? files.length + ' archivos' : 'el archivo') + '…');
+    leerArchivos(files).then(function (r) {
+      var lista = r.students.map(function (s) {
+        var curso = s.curso || (r.meta && r.meta.nivel === '8B' ? '8° Básico' : r.meta && r.meta.nivel === '4M' && !r.meta.curso ? '4° Medio' : '');
+        return { nombre: s.nombre, original: s.original, invertido: s.invertido, run: s.run, curso: curso };
       });
-    }).then(function (lista) {
-      if (!lista.length) throw new Error('No se encontraron alumnos. Revise que existan las columnas "curso" y "nombre".');
+      if (!lista.length) throw new Error('No se encontraron alumnos. Suba la "Lista de Curso" del SIGE, la nómina PDF, o un Excel/CSV con columnas "curso" y "nombre".');
       S.dipPending = lista;
       var sinCurso = lista.filter(function (a) { return !a.curso; }).length;
       var cursos = cursosDe(lista);
-      $('#dipImportInfo').innerHTML = '<div class="imp-head"><b>' + lista.length + '</b> alumnos detectados en <i>' + esc(file.name) + '</i> para el año <b>' + esc(S.anio) + '</b></div>' +
+      $('#dipImportInfo').innerHTML = '<div class="imp-head"><b>' + lista.length + '</b> alumnos detectados en <i>' + esc(r.nombre) + '</i> para el año <b>' + esc(S.anio) + '</b></div>' +
         (cursos.length ? '<div class="kvs mt-s">' + cursos.map(function (c) { return '<span class="kv"><small>' + c[1] + ' alumnos</small>' + esc(c[0]) + '</span>'; }).join('') + '</div>' : '') +
-        (sinCurso ? '<label class="mt-s">Curso para los ' + sinCurso + ' alumnos sin curso<input id="dipCursoDef" placeholder="Ej.: 3° Básico A"></label>' : '');
+        (sinCurso ? '<label class="mt-s">Curso para los ' + sinCurso + ' alumnos sin curso<input id="dipCursoDef" placeholder="Ej.: 3° Básico A"></label>' : '') +
+        ordenNombresHtml(lista, 'ordenDip');
       $('#dipImport').classList.remove('hidden');
-    }).catch(function (e) { toast(e.message || 'No se pudo leer el archivo', true); });
+    }).catch(function (e) { toast(e.message || 'No se pudo leer el archivo', true); }).then(function () { busy(false); });
   }
   $('#btnDipCancel').addEventListener('click', function () { S.dipPending = null; $('#dipImport').classList.add('hidden'); });
   $('#btnDipImport').addEventListener('click', function () {
     var def = $('#dipCursoDef') ? $('#dipCursoDef').value.trim() : '';
-    var lista = (S.dipPending || []).map(function (a) { return { nombre: a.nombre, run: a.run, curso: a.curso || def }; });
+    var lista = aplicarOrden(S.dipPending || [], 'ordenDip').map(function (a) { return { nombre: a.nombre, run: a.run, curso: a.curso || def }; });
     if (lista.some(function (a) { return !a.curso; })) return toast('Indique el curso de los alumnos que no lo tienen', true);
     busy(true, 'Agregando alumnos…');
     api('importAlumnos', { anio: S.anio, alumnos: lista }).then(function (r) {
@@ -1020,7 +1157,7 @@
       return '<option value="' + esc(m) + '"' + (m === mSel ? ' selected' : '') + '>' + esc(m) + ' (' + motivos[m] + ')</option>'; }).join('');
     var list = diplomasFiltrados();
     $('#dipTable tbody').innerHTML = list.map(function (d) {
-      return '<tr data-id="' + esc(d.id) + '"><td>' + esc(Licencia.fechaLarga(d.fecha)) + '</td><td class="name">' + esc(d.nombre) + '</td><td><span class="chip curso">' + esc(d.curso) +
+      return '<tr data-id="' + esc(d.id) + '"><td>' + esc(Licencia.fechaLarga(d.fecha)) + '</td><td class="name">' + esc(d.nombre) + penBtn() + '</td><td><span class="chip curso">' + esc(d.curso) +
         '</span></td><td>' + esc(d.motivo) + '</td><td>' + esc(d.emitidoPor) + '<br><small class="muted">' + esc(fmtDate(d.emitido)) + '</small></td>' +
         '<td class="actions"><button class="link" data-act="dl">Descargar PDF</button>' + (S.user.rol === 'admin' ? '<button class="link danger" data-act="del">Quitar</button>' : '') + '</td></tr>';
     }).join('');
@@ -1034,7 +1171,12 @@
   $('#dipTable tbody').addEventListener('click', function (e) {
     var b = e.target.closest('button[data-act]'); if (!b) return;
     var d = S.diplomas.filter(function (x) { return x.id === b.closest('tr').dataset.id; })[0];
-    if (b.dataset.act === 'dl') Licencia.buildDiplomas([dipDatos(d)], S.assets, printOpts()).save('Diploma_' + slug(d.nombre) + '.pdf');
+    if (b.dataset.act === 'nom') renombrar('diploma', d, 'alumnos', loadDiplomas, function () {
+      return confirmDlg('Nombre corregido', '¿Descargar ahora el diploma de <b>' + esc(d.nombre) + '</b> con el nombre corregido?').then(function (ok) {
+        if (ok) Licencia.buildDiplomas([dipDatos(d)], S.assets, printOpts()).save('Diploma_' + slug(d.nombre) + '.pdf');
+      });
+    });
+    else if (b.dataset.act === 'dl') Licencia.buildDiplomas([dipDatos(d)], S.assets, printOpts()).save('Diploma_' + slug(d.nombre) + '.pdf');
     else confirmDlg('Quitar diploma', '¿Quitar el diploma de <b>' + esc(d.nombre) + '</b> (' + esc(d.motivo) + ') del archivo?').then(function (ok) {
       if (ok) api('deleteDiploma', { id: d.id }).then(loadDiplomas).catch(function (err) { toast(err.message, true); });
     });
@@ -1096,6 +1238,29 @@
     });
   }
   function confirmDlg(title, html) { return openDlg(title, '<p>' + html + '</p>'); }
+  /* Corregir el nombre tal como saldrá impreso. opts.lista: muestra la casilla "corregir también en la lista" */
+  function dlgNombre(titulo, nombre, opts) {
+    opts = opts || {};
+    var html = '<label>Nombre como aparecerá en el documento<input name="nombre" value="' + esc(nombre) + '" required maxlength="90"></label>' +
+      '<div class="row mt-s"><button type="button" class="btn ghost sm" data-fmt="tc">Mayúscula inicial</button>' +
+      '<button type="button" class="btn ghost sm" data-fmt="inv">Pasar primer(os) apellido(s) al final</button></div>' +
+      (opts.lista ? '<label class="check mt-s"><input type="checkbox" name="enLista" checked> Corregir también en la lista de ' + esc(opts.lista) + '</label>' : '') +
+      (opts.nota ? '<p class="muted small mt-s">' + opts.nota + '</p>' : '');
+    var p = openDlg(titulo, html);
+    var inp = $('#dlgBody [name="nombre"]');
+    $('#dlgBody').onclick = function (e) {
+      var b = e.target.closest('[data-fmt]'); if (!b) return;
+      inp.value = b.dataset.fmt === 'tc' ? titleCase(inp.value.toUpperCase()) : nombreDesdeApellidos(inp.value);
+      inp.focus();
+    };
+    setTimeout(function () { inp.select(); }, 30);
+    return p.then(function (ok) {
+      var v = inp.value.replace(/\s+/g, ' ').trim();
+      if (!ok || !v) return null;
+      var c = $('#dlgBody [name="enLista"]');
+      return { nombre: v, enLista: c ? c.checked : false };
+    });
+  }
   function formDlg(title, fields) {
     var html = fields.map(function (f) {
       if (f.type === 'select') return '<label>' + esc(f.label) + '<select name="' + f.name + '">' + f.options.map(function (o) {

@@ -251,3 +251,41 @@ body:not(.is-admin) .admin-only { display: none !important; }
   .form-grid .span2 { grid-column: auto; }
   .topbar { padding: 10px 16px; }
 }
+
+/* ===== v6: módulos separados (Licencias / Diplomas) ===== */
+.brand { cursor: pointer; }
+.modswitch { display: flex; background: #f1eee6; border-radius: 10px; padding: 3px; gap: 2px; }
+.modswitch button { border: 0; background: none; padding: 7px 14px; border-radius: 8px; font: 700 13px Inter, sans-serif; color: var(--muted); cursor: pointer; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.modswitch button span { font-size: 14px; }
+.modswitch button:hover { color: var(--ink); }
+.modswitch button.on { background: #19305e; color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.18); }
+.modswitch button[data-mod="dip"].on { background: #6d1f3a; }
+body.en-inicio .tabs { visibility: hidden; }
+body.en-inicio #modswitch { display: none; }
+
+.home-head { text-align: center; margin: 18px 0 22px; }
+.home-head h2 { font-size: 26px; color: var(--navy); margin: 0 0 6px; }
+.home-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 20px; max-width: 900px; margin: 0 auto; }
+.home-card { text-align: left; border: 0; border-radius: 16px; padding: 28px 26px; color: #fff; cursor: pointer; display: flex; flex-direction: column; gap: 10px;
+  font: 400 14.5px/1.5 Inter, sans-serif; box-shadow: 0 10px 28px rgba(10,20,50,.16); transition: transform .15s ease, box-shadow .15s ease; position: relative; overflow: hidden; }
+.home-card:hover { transform: translateY(-3px); box-shadow: 0 16px 36px rgba(10,20,50,.22); }
+.home-card:focus-visible { outline: 3px solid #c9a24a; outline-offset: 3px; }
+.home-card.lic { background: linear-gradient(140deg, #13284f, #24427a); }
+.home-card.dip { background: linear-gradient(140deg, #5a1730, #8a2b4c); }
+.home-card .hc-icon { width: 54px; height: 54px; border-radius: 50%; background: rgba(255,255,255,.14); display: grid; place-content: center; font-size: 26px; box-shadow: inset 0 0 0 2px rgba(214,180,100,.7); }
+.home-card b { font-size: 21px; font-family: 'Cormorant Garamond', serif; font-style: italic; font-weight: 600; letter-spacing: .01em; }
+.home-card span { color: rgba(255,255,255,.86); }
+.home-card em { font-style: normal; font-weight: 700; color: #e6c779; margin-top: 6px; }
+
+.pen { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 14px; padding: 0 4px; border-radius: 4px; opacity: .55; }
+tr:hover .pen { opacity: 1; }
+.pen:hover, .pen:focus-visible { color: var(--navy); background: var(--gold-soft); opacity: 1; }
+.name-order { background: #fff8e6; border: 1px solid #f0dca8; border-radius: 10px; padding: 10px 12px; margin: 8px 0; font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
+.name-order .check { font-weight: 500; }
+.name-order small { color: var(--muted); }
+@media (max-width: 720px) { .modswitch { order: 3; } .home-card { padding: 22px 18px; } }
+/* pestañas del módulo en su propia fila, bajo el selector Licencias / Diplomas */
+.topbar { row-gap: 8px; }
+.tabs { order: 10; flex-basis: 100%; border-top: 1px solid #eee9dd; padding-top: 6px; }
+.year-pick { margin-left: auto; }
+body.en-inicio .tabs { display: none; }

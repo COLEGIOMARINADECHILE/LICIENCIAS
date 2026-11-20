@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Cormorant+Garamond:ital,wght@1,600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=6">
+<link rel="stylesheet" href="styles.css?v=7">
 </head>
 <body>
 
@@ -25,16 +25,20 @@
   </div>
   <form class="login-card" id="loginForm" autocomplete="on">
     <h2>Bienvenido</h2>
-    <p class="muted">Seleccione su nombre e ingrese su clave.</p>
-    <label>Usuario
-      <select id="loginUser" required><option value="">Cargando…</option></select>
-    </label>
-    <label>Clave
-      <input id="loginPass" type="password" required autocomplete="current-password">
-    </label>
-    <button class="btn primary block" type="submit">Ingresar</button>
+    <p class="muted">¿Quién ingresa? Toque su nombre.</p>
+    <input type="search" id="userSearch" class="user-search hidden" placeholder="Buscar su nombre…" aria-label="Buscar usuario">
+    <div class="user-pick" id="userPick" role="radiogroup" aria-label="Usuarios"><p class="muted">Cargando…</p></div>
+    <input type="hidden" id="loginUser">
+    <div class="pass-wrap" id="passWrap">
+      <label><span>Clave <b id="passWho"></b></span>
+        <span class="pass-field"><input id="loginPass" type="password" autocomplete="current-password" placeholder="Seleccione primero su nombre" disabled>
+          <button type="button" class="eye" id="btnEye" aria-label="Mostrar clave" title="Mostrar clave">👁</button></span>
+      </label>
+    </div>
+    <button class="btn primary block" type="submit" id="btnIngresar" disabled>Ingresar</button>
+    <button type="button" class="link forgot" id="btnOlvide">¿Olvidó su clave?</button>
     <p class="error" id="loginError"></p>
-    <p class="ver">Versión 6 · licencias y diplomas por separado</p>
+    <p class="ver">Versión 7 · invitaciones y recuperación de clave</p>
     <p class="demo-note hidden" id="demoNote">Modo demostración: los datos se guardan solo en este navegador y se acepta cualquier clave. Configure <code>config.js</code> para usar Apps Script.</p>
   </form>
 </section>
@@ -145,6 +149,7 @@
 
       <div class="actionbar">
         <span id="selInfo">0 seleccionados</span>
+        <button class="btn ghost danger" id="btnDelSel" title="Eliminar de la lista a los estudiantes seleccionados">Eliminar</button>
         <button class="btn ghost" id="btnPreview">Vista previa</button>
         <button class="btn primary" id="btnEmitir">3. Generar PDF y guardar</button>
       </div>
@@ -241,6 +246,7 @@
       <div class="actionbar dip-actions hidden" id="dipActionbar">
         <span id="dipSelInfo">0 seleccionados</span>
         <button class="btn ghost" id="btnDipClear">Limpiar selección</button>
+        <button class="btn ghost danger" id="btnDipDel" title="Eliminar de la lista a los alumnos seleccionados">Eliminar alumnos</button>
         <button class="btn primary" id="btnDipEmitir">Generar diplomas y guardar</button>
       </div>
     </div>
@@ -326,21 +332,20 @@
           <h3>Usuarios</h3>
           <div class="table-wrap">
             <table class="tbl" id="userTable">
-              <thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Activo</th><th></th></tr></thead>
+              <thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Estado</th><th></th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
         </div>
         <form class="card" id="userForm">
           <h3>Nuevo usuario</h3>
-          <p class="muted">Aparecerá en la lista de la pantalla de ingreso.</p>
+          <p class="muted">Se le enviará una <b>invitación por correo con una clave provisoria</b>. Al ingresar por primera vez, la página le pedirá crear su clave personal.</p>
           <div class="form-grid">
             <label class="span2">Nombre completo<input name="nombre" required></label>
-            <label class="span2">Correo<input name="email" type="email"></label>
-            <label>Clave inicial<input name="password" type="password" minlength="8" required></label>
+            <label class="span2">Correo del funcionario<input name="email" type="email" required placeholder="nombre@colegio.cl"></label>
             <label>Rol<select name="rol"><option value="usuario">Usuario</option><option value="admin">Administrador</option></select></label>
           </div>
-          <div class="row end mt"><button class="btn primary" type="submit">Crear usuario</button></div>
+          <div class="row end mt"><button class="btn primary" type="submit">Crear y enviar invitación</button></div>
         </form>
       </div>
     </div>
@@ -364,8 +369,8 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="config.js?v=6"></script>
-<script src="licencia.js?v=6"></script>
-<script src="app.js?v=6"></script>
+<script src="config.js?v=7"></script>
+<script src="licencia.js?v=7"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>

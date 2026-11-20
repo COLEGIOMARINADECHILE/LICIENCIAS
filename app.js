@@ -27,18 +27,34 @@
   function slug(s) { return String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w]+/g, '_').replace(/^_|_$/g, ''); }
   // orden de la lista: por N° de registro (los vacíos al final, por nombre)
   function porRegistro(a, b) {
-    var x = parseFloat(a.registro), y = parseFloat(b.registro);
-    if (isNaN(x) && isNaN(y)) return a.nombre.localeCompare(b.nombre);
+    var x = parseFloat(a.registro), y = parseFloat(b.registro), o = (a.orden || 1e9) - (b.orden || 1e9);
+    if (isNaN(x) && isNaN(y)) return o || a.nombre.localeCompare(b.nombre);
     if (isNaN(x)) return 1; if (isNaN(y)) return -1;
-    return x - y || a.nombre.localeCompare(b.nombre);
+    return x - y || o;
   }
+  function maxOrden(list) { return list.reduce(function (m, x) { return Math.max(m, Number(x.orden) || 0); }, 0); }
   function penBtn() { return ' <button class="pen" data-act="nom" title="Corregir el nombre" aria-label="Corregir el nombre">✎</button>'; }
   function pick(o, keys) { var r = {}; keys.forEach(function (k) { if (o[k]) r[k] = o[k]; }); return r; }
   function norm(s) { return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
 
   // R.U.N. chileno: formato y dígito verificador
   function runClean(r) { return String(r || '').toUpperCase().replace(/[^0-9K]/g, ''); }
+  /* IPE (Identificador Provisorio Escolar): alumnos sin RUN chileno, números desde 100.000.000
+     (o el genérico "100.000-000"). Se aceptan y no se usan para detectar repetidos. */
+  function runEsIPE(r) {
+    var s = String(r || '').trim(), c = runClean(s);
+    return /^\d{3}\.?\d{3}-\d{3}$/.test(s) || (c.length >= 10 && Number(c.slice(0, -1)) >= 100000000);
+  }
+  // clave para detectar repetidos: el RUN solo si es real y válido; si no, el nombre (y curso)
+  function claveAlumno(run, nombre, extra) {
+    return runValid(run) && !runEsIPE(run) ? 'r' + runClean(run) : 'n' + (extra || '') + '|' + String(nombre || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  }
+  function runChip(r) {
+    if (runEsIPE(r)) return '<span class="chip ipe" title="Identificador Provisorio Escolar (alumno sin RUN chileno)">IPE</span>';
+    return runValid(r) ? '' : '<span class="badrun">R.U.N. no válido</span>';
+  }
   function runFormat(r) {
+    if (/^\s*\d{3}\.?\d{3}-\d{3}\s*$/.test(String(r || ''))) return String(r).trim(); // "100.000-000" tal cual
     var c = runClean(r); if (c.length < 2) return String(r || '').trim();
     var body = c.slice(0, -1), dv = c.slice(-1);
     return body.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + '-' + dv;
@@ -83,13 +99,14 @@
     }
     function imp(d, q, u) {
       var seen = {}, add = 0, om = 0;
-      d.students.forEach(function (s) { if (s.nivel === q.nivel && s.anio === String(q.anio)) seen[runClean(s.run)] = 1; });
+      var del = d.students.filter(function (s) { return s.nivel === q.nivel && s.anio === String(q.anio); }), orden = maxOrden(del);
+      del.forEach(function (s) { seen[claveAlumno(s.run, s.nombre)] = 1; });
       (q.students || []).forEach(function (r) {
-        var n = String(r.nombre || '').replace(/\s+/g, ' ').trim(), k = runClean(r.run);
-        if (!n || (k && seen[k])) { om++; return; }
-        if (k) seen[k] = 1; add++;
+        var n = String(r.nombre || '').replace(/\s+/g, ' ').trim(), k = claveAlumno(r.run, n);
+        if (!n || seen[k]) { om++; return; }
+        seen[k] = 1; add++;
         d.students.push({ id: id('s-'), nivel: q.nivel, anio: String(q.anio), nombre: n, run: String(r.run || '').trim().toUpperCase(),
-          sexo: /^f/i.test(r.sexo || '') ? 'F' : /^m/i.test(r.sexo || '') ? 'M' : '', registro: String(r.registro == null ? '' : r.registro).trim(), creadoPor: u.nombre });
+          sexo: /^f/i.test(r.sexo || '') ? 'F' : /^m/i.test(r.sexo || '') ? 'M' : '', registro: String(r.registro == null ? '' : r.registro).trim(), creadoPor: u.nombre, orden: ++orden });
       });
       return { agregados: add, omitidos: om, lista: listStud(d, q) };
     }
@@ -97,7 +114,7 @@
       listUsers: function (d) { return d.users.filter(function (u) { return u.activo; }).map(function (u) { return { id: u.id, nombre: u.nombre }; }); },
       login: function (d, q) {
         var u = d.users.filter(function (x) { return x.id === q.userId && x.activo; })[0];
-        if (!u || !q.password) throw new Error('Usuario o clave incorrectos');
+        if (!u || !q.password || (u.clave && q.password !== u.clave)) throw new Error('Usuario o clave incorrectos');
         var t = id('t-'); d.tokens[t] = u.id; return { token: t, user: u };
       },
       logout: function () { return true; },
@@ -109,7 +126,7 @@
       importStudents: imp,
       addStudent: function (d, q, u) { return imp(d, { nivel: q.nivel, anio: q.anio, students: [q.student] }, u); },
       updateStudent: function (d, q) { var s = d.students.filter(function (x) { return x.id === q.id; })[0]; Object.assign(s, q.student); return true; },
-      deleteStudent: function (d, q) { d.students = d.students.filter(function (x) { return x.id !== q.id; }); return true; },
+      deleteStudent: function (d, q) { var ids = q.ids || [q.id]; d.students = d.students.filter(function (x) { return ids.indexOf(x.id) < 0; }); return ids.length; },
       emitir: function (d, q, u) {
         var c = d.config, faltan = ['colegio', 'rbd', 'region', 'provincia', 'comuna', 'directora', 'fecha'].filter(function (k) { return !c[k]; });
         if (faltan.length) throw new Error('Complete los datos del colegio antes de emitir: ' + faltan.join(', '));
@@ -135,20 +152,21 @@
         var cnt = {}; d.dips.forEach(function (x) { if (x.anio === String(q.anio)) cnt[x.alumnoId] = (cnt[x.alumnoId] || 0) + 1; });
         return d.alumnos.filter(function (a) { return a.anio === String(q.anio); })
           .map(function (a) { return Object.assign({}, a, { diplomas: cnt[a.id] || 0 }); })
-          .sort(function (a, b) { return a.curso.localeCompare(b.curso, 'es', { numeric: true }) || a.nombre.localeCompare(b.nombre); });
+          .sort(function (a, b) { return a.curso.localeCompare(b.curso, 'es', { numeric: true }) || (a.orden || 1e9) - (b.orden || 1e9) || a.nombre.localeCompare(b.nombre); });
       },
       importAlumnos: function (d, q, u) {
         d.alumnos = d.alumnos || []; var seen = {}, add = 0, om = 0;
-        d.alumnos.forEach(function (a) { if (a.anio === String(q.anio)) seen[runClean(a.run) || a.curso + '|' + a.nombre] = 1; });
+        var del = d.alumnos.filter(function (a) { return a.anio === String(q.anio); }), orden = maxOrden(del);
+        del.forEach(function (a) { seen[claveAlumno(a.run, a.nombre, a.curso)] = 1; });
         (q.alumnos || []).forEach(function (r) {
-          var k = runClean(r.run) || r.curso + '|' + r.nombre;
+          var k = claveAlumno(r.run, r.nombre, r.curso);
           if (!r.nombre || !r.curso || seen[k]) { om++; return; }
           seen[k] = 1; add++;
-          d.alumnos.push({ id: id('a-'), anio: String(q.anio), curso: String(r.curso).trim(), nombre: String(r.nombre).trim(), run: String(r.run || ''), creadoPor: u.nombre });
+          d.alumnos.push({ id: id('a-'), anio: String(q.anio), curso: String(r.curso).trim(), nombre: String(r.nombre).trim(), run: String(r.run || ''), creadoPor: u.nombre, orden: ++orden });
         });
         return { agregados: add, omitidos: om };
       },
-      deleteAlumno: function (d, q) { d.alumnos = (d.alumnos || []).filter(function (a) { return a.id !== q.id; }); return true; },
+      deleteAlumno: function (d, q) { var ids = q.ids || [q.id]; d.alumnos = (d.alumnos || []).filter(function (a) { return ids.indexOf(a.id) < 0; }); return ids.length; },
       deleteCurso: function (d, q) { d.alumnos = (d.alumnos || []).filter(function (a) { return !(a.anio === String(q.anio) && a.curso === q.curso); }); return true; },
       emitirDiplomas: function (d, q, u) {
         d.dips = d.dips || []; var c = d.config, now = new Date().toISOString();
@@ -177,9 +195,32 @@
         d.lic.forEach(function (l) { if ((q.ids || []).indexOf(l.id) >= 0) l.impresa = !!q.impresa; }); return true;
       },
       deleteLicencia: function (d, q) { d.lic = d.lic.filter(function (l) { return l.id !== q.id; }); return true; },
-      changePassword: function () { return true; },
+      // demo: no envía correos; muestra la clave/código en pantalla
+      changePassword: function (d, q, u) { u.cambiarClave = false; u.clave = q.nueva; return true; },
       adminListUsers: function (d) { return d.users; },
-      createUser: function (d, q) { d.users.push({ id: id('u-'), nombre: q.nombre, email: q.email, rol: q.rol, activo: true }); return d.users; },
+      createUser: function (d, q) {
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(q.email || '')) throw new Error('Indique un correo válido: allí se enviará la invitación');
+        var clave = 'Demo' + Math.floor(1000 + Math.random() * 9000);
+        d.users.push({ id: id('u-'), nombre: q.nombre, email: q.email, rol: q.rol, activo: true, cambiarClave: true, clave: clave });
+        return { lista: d.users, enviado: false, email: q.email, clave: clave };
+      },
+      reenviarInvitacion: function (d, q) {
+        var u = d.users.filter(function (x) { return x.id === q.id; })[0], clave = 'Demo' + Math.floor(1000 + Math.random() * 9000);
+        u.cambiarClave = true; u.clave = clave;
+        return { lista: d.users, enviado: false, email: u.email, clave: clave };
+      },
+      solicitarCodigo: function (d, q) {
+        var u = d.users.filter(function (x) { return x.id === q.userId; })[0];
+        if (!u) throw new Error('Seleccione su nombre');
+        if (!u.email) throw new Error('Su usuario no tiene correo registrado. Pida al administrador que le envíe una clave provisoria.');
+        d.codigo = String(Math.floor(100000 + Math.random() * 900000));
+        return { correo: u.email.slice(0, 2) + '•••@' + u.email.split('@')[1], demoCodigo: d.codigo };
+      },
+      restablecerClave: function (d, q) {
+        if (!d.codigo || q.codigo !== d.codigo) throw new Error('Código incorrecto');
+        var u = d.users.filter(function (x) { return x.id === q.userId; })[0]; u.clave = q.nueva; u.cambiarClave = false; d.codigo = null;
+        return true;
+      },
       updateUser: function (d, q) { var u = d.users.filter(function (x) { return x.id === q.id; })[0]; ['nombre', 'email', 'rol', 'activo'].forEach(function (k) { if (q[k] != null) u[k] = q[k]; }); return d.users; },
       deleteUser: function (d, q) { d.users = d.users.filter(function (x) { return x.id !== q.id; }); return d.users; }
     };
@@ -190,7 +231,7 @@
             var d = load();
             try {
               var u = null;
-              if (q.action !== 'listUsers' && q.action !== 'login') {
+              if (['listUsers', 'login', 'solicitarCodigo', 'restablecerClave'].indexOf(q.action) < 0) {
                 var uid = d.tokens[q.token]; u = d.users.filter(function (x) { return x.id === uid; })[0];
                 if (!u) throw new Error('SESION_EXPIRADA');
               }
@@ -203,32 +244,125 @@
   })();
 
   /* ---------------- login ---------------- */
+  /* ---- Selector visual de usuario: tarjetas con iniciales; recuerda al último que ingresó en este equipo ---- */
+  var AV_COLORS = ['#19305e', '#6d1f3a', '#1d5c46', '#7a4b12', '#4a2f6b', '#245a7a', '#7a2a2a', '#3d5a1e'];
+  function iniciales(n) {
+    var w = String(n || '').trim().split(/\s+/).filter(function (x) { return x.length > 2 || /^[A-ZÁÉÍÓÚÑ]/.test(x); });
+    return ((w[0] || '?').charAt(0) + (w.length > 1 ? w[w.length > 2 ? 2 : 1].charAt(0) : '')).toUpperCase();
+  }
+  function avatarHtml(n, size) {
+    var h = 0; String(n).split('').forEach(function (c) { h = (h * 31 + c.charCodeAt(0)) >>> 0; });
+    return '<span class="avatar' + (size ? ' ' + size : '') + '" style="background:' + AV_COLORS[h % AV_COLORS.length] + '">' + esc(iniciales(n)) + '</span>';
+  }
+  S.loginUsers = [];
   function loadUsers() {
     return api('listUsers').then(function (list) {
-      $('#loginUser').innerHTML = '<option value="">Seleccione su nombre…</option>' +
-        list.map(function (u) { return '<option value="' + esc(u.id) + '">' + esc(u.nombre) + '</option>'; }).join('');
+      S.loginUsers = list;
+      $('#userSearch').classList.toggle('hidden', list.length <= 6);
+      renderUserPick();
+      var last = ''; try { last = localStorage.getItem('lic_last_user') || ''; } catch (e) {}
+      if (list.length === 1) last = list[0].id;
+      if (last && list.some(function (u) { return u.id === last; })) elegirUsuario(last, true);
     }).catch(function (e) { $('#loginError').textContent = 'No se pudo conectar: ' + e.message; });
   }
+  function renderUserPick() {
+    var q = norm($('#userSearch').value), sel = $('#loginUser').value;
+    var list = S.loginUsers.filter(function (u) { return !q || norm(u.nombre).indexOf(q) >= 0; });
+    $('#userPick').innerHTML = list.length ? list.map(function (u) {
+      return '<button type="button" role="radio" aria-checked="' + (u.id === sel) + '" class="user-card' + (u.id === sel ? ' on' : '') + '" data-uid="' + esc(u.id) + '">' +
+        avatarHtml(u.nombre) + '<span class="uc-name">' + esc(u.nombre) + '</span><span class="uc-check">✓</span></button>';
+    }).join('') : '<p class="muted">No hay usuarios con ese nombre.</p>';
+  }
+  function elegirUsuario(id, sinFoco) {
+    var u = S.loginUsers.filter(function (x) { return x.id === id; })[0]; if (!u) return;
+    $('#loginUser').value = id;
+    $('#passWho').textContent = 'de ' + u.nombre.split(' ')[0];
+    $('#loginPass').disabled = false; $('#loginPass').placeholder = 'Escriba su clave'; $('#btnIngresar').disabled = false;
+    $('#loginError').textContent = '';
+    renderUserPick();
+    if (!sinFoco) $('#loginPass').focus();
+  }
+  $('#userPick').addEventListener('click', function (e) { var b = e.target.closest('[data-uid]'); if (b) elegirUsuario(b.dataset.uid); });
+  $('#userSearch').addEventListener('input', renderUserPick);
+  $('#btnEye').addEventListener('click', function () {
+    var p = $('#loginPass'); p.type = p.type === 'password' ? 'text' : 'password';
+  });
 
   $('#loginForm').addEventListener('submit', function (e) {
     e.preventDefault();
     $('#loginError').textContent = '';
+    var uid = $('#loginUser').value, pass = $('#loginPass').value;
+    if (!uid) { $('#loginError').textContent = 'Toque su nombre en la lista.'; return; }
+    if (!pass) { $('#loginError').textContent = 'Escriba su clave.'; $('#loginPass').focus(); return; }
     busy(true, 'Ingresando…');
-    api('login', { userId: $('#loginUser').value, password: $('#loginPass').value }).then(function (r) {
+    api('login', { userId: uid, password: pass }).then(function (r) {
       S.token = r.token; ss('set', 'lic_token', r.token); $('#loginPass').value = '';
-      return startApp(r.user);
+      try { localStorage.setItem('lic_last_user', uid); } catch (e2) {}
+      return startApp(r.user, pass);
     }).catch(function (err) { $('#loginError').textContent = err.message; }).then(function () { busy(false); });
   });
 
+  /* ---- Recuperar clave: código de 6 dígitos al correo del usuario (su clave actual sigue válida hasta usarlo) ---- */
+  $('#btnOlvide').addEventListener('click', function () {
+    var uid = $('#loginUser').value;
+    if (!uid) { $('#loginError').textContent = 'Primero toque su nombre en la lista y luego "¿Olvidó su clave?".'; return; }
+    var u = S.loginUsers.filter(function (x) { return x.id === uid; })[0];
+    confirmDlg('Recuperar clave', 'Enviaremos un <b>código de 6 dígitos</b> al correo registrado de <b>' + esc(u.nombre) + '</b> para que cree una nueva clave.').then(function (ok) {
+      if (!ok) return;
+      busy(true, 'Enviando código…');
+      api('solicitarCodigo', { userId: uid }).then(function (r) {
+        busy(false);
+        if (r.demoCodigo) toast('Modo demostración: el código es ' + r.demoCodigo);
+        return pedirCodigo(uid, r.correo);
+      }).catch(function (e) { busy(false); $('#loginError').textContent = e.message; });
+    });
+  });
+  function pedirCodigo(uid, correo, msg) {
+    return formDlg('Crear nueva clave', [
+      { name: 'codigo', label: 'Código enviado a ' + correo + (msg ? ' — ' + msg : ''), required: true, minlength: 6 },
+      { name: 'nueva', label: 'Nueva clave (mín. 8 caracteres)', type: 'password', required: true, minlength: 8 },
+      { name: 'repite', label: 'Repita la nueva clave', type: 'password', required: true, minlength: 8 }
+    ]).then(function (v) {
+      if (!v) return;
+      if (v.nueva !== v.repite) return pedirCodigo(uid, correo, 'las claves no coincidían');
+      busy(true, 'Guardando…');
+      return api('restablecerClave', { userId: uid, codigo: v.codigo, nueva: v.nueva }).then(function () {
+        busy(false); toast('Clave actualizada. Ya puede ingresar.');
+        $('#loginPass').value = ''; $('#loginPass').focus();
+      }).catch(function (e) {
+        busy(false);
+        if (/incorrecto/i.test(e.message)) return pedirCodigo(uid, correo, 'código incorrecto');
+        $('#loginError').textContent = e.message;
+      });
+    });
+  }
+
+  /* ---- Primer ingreso con clave provisoria: obliga a crear la clave personal ---- */
+  function crearClavePersonal(provisoria, msg) {
+    var campos = (provisoria ? [] : [{ name: 'actual', label: 'Clave provisoria (la del correo)', type: 'password', required: true }]).concat([
+      { name: 'nueva', label: 'Su nueva clave personal (mín. 8 caracteres)', type: 'password', required: true, minlength: 8 },
+      { name: 'repite', label: 'Repita la nueva clave', type: 'password', required: true, minlength: 8 }
+    ]);
+    return formDlg('Bienvenido(a): cree su clave personal' + (msg ? ' — ' + msg : ''), campos).then(function (v) {
+      if (!v) return toast('Deberá crear su clave personal la próxima vez que ingrese', true);
+      if (v.nueva !== v.repite) return crearClavePersonal(provisoria, 'las claves no coinciden');
+      return api('changePassword', { actual: provisoria || v.actual, nueva: v.nueva }).then(function () {
+        S.user.cambiarClave = false; toast('Clave personal creada');
+      }).catch(function (e) { return crearClavePersonal(provisoria, e.message); });
+    });
+  }
+
   function logoutLocal() {
     S.token = null; ss('del', 'lic_token');
+    document.body.classList.remove('modo-dip', 'en-inicio');
     $('#app').classList.add('hidden'); $('#login').classList.remove('hidden');
     loadUsers();
   }
   $('#btnLogout').addEventListener('click', function () { api('logout').catch(function () {}); logoutLocal(); });
 
-  function startApp(user) {
+  function startApp(user, claveIngresada) {
     S.user = user;
+    if (user.cambiarClave) setTimeout(function () { crearClavePersonal(claveIngresada); }, 400);
     document.body.classList.toggle('is-admin', user.rol === 'admin');
     $('#meName').textContent = user.nombre;
     $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
@@ -454,7 +588,7 @@
       return '<tr data-id="' + esc(s.id) + '">' +
         '<td><input type="checkbox" class="sel"' + (S.selected[s.id] ? ' checked' : '') + '></td>' +
         '<td class="name">' + esc(s.nombre) + penBtn() + '</td>' +
-        '<td>' + esc(runFormat(s.run)) + (runValid(s.run) ? '' : '<span class="badrun">R.U.N. no válido</span>') + '</td>' +
+        '<td>' + esc(runFormat(s.run)) + runChip(s.run) + '</td>' +
         '<td><input class="reg' + (dup ? ' dup' : '') + '" value="' + esc(s.registro) + '" inputmode="numeric" title="' + (dup ? 'N° repetido' : '') + '"></td>' +
         '<td>' + (s.emitida ? '<span class="chip ok">Emitida ' + esc(fmtDate(s.emitida).split(' ')[0]) + '</span>' : '<span class="chip pend">Pendiente</span>') + '</td>' +
         '<td class="actions"><button class="link" data-act="pdf">PDF</button><button class="link" data-act="edit">Editar</button><button class="link danger" data-act="del">Eliminar</button></td></tr>';
@@ -468,8 +602,19 @@
     var n = Object.keys(S.selected).length;
     $('#selInfo').textContent = n + ' seleccionado' + (n === 1 ? '' : 's');
     $('#chkAll').checked = n > 0 && n === S.students.length;
-    $('#btnEmitir').disabled = n === 0; $('#btnPreview').disabled = n === 0;
+    $('#btnEmitir').disabled = n === 0; $('#btnPreview').disabled = n === 0; $('#btnDelSel').disabled = n === 0;
   }
+  $('#btnDelSel').addEventListener('click', function () {
+    var ids = Object.keys(S.selected); if (!ids.length) return;
+    var nom = S.students.filter(function (s) { return S.selected[s.id]; }).map(function (s) { return s.nombre; });
+    confirmDlg('Eliminar estudiantes', '¿Eliminar de la lista a <b>' + ids.length + '</b> estudiante' + (ids.length > 1 ? 's' : '') + '?<br><small class="muted">' +
+      esc(nom.slice(0, 6).join(', ')) + (nom.length > 6 ? '…' : '') + '</small><br>Las licencias ya guardadas en el archivo no se borran.').then(function (ok) {
+      if (!ok) return;
+      busy(true, 'Eliminando…');
+      api('deleteStudent', { ids: ids }).then(function () { S.selected = {}; toast(ids.length + ' eliminado(s)'); return loadStudents(); })
+        .catch(function (e) { toast(e.message, true); }).then(function () { busy(false); });
+    });
+  });
 
   $('#chkAll').addEventListener('change', function () {
     var on = this.checked; S.selected = {};
@@ -531,7 +676,7 @@
   $('#addForm').addEventListener('submit', function (e) {
     e.preventDefault();
     var f = e.target, st = { nombre: f.nombre.value, run: runFormat(f.run.value), sexo: f.sexo.value, registro: f.registro.value };
-    if (!runValid(st.run) && !window.confirm('El R.U.N. ' + st.run + ' no parece válido. ¿Agregar de todas formas?')) return;
+    if (!runValid(st.run) && !runEsIPE(st.run) && !window.confirm('El R.U.N. ' + st.run + ' no parece válido. ¿Agregar de todas formas?')) return;
     api('addStudent', { nivel: S.nivel, anio: S.anio, student: st }).then(function (r) {
       if (!r.agregados) toast('Ese R.U.N. ya existe en este curso', true); else { toast('Estudiante agregado'); f.reset(); }
       S.students = r.lista; renderStudents();
@@ -634,7 +779,8 @@
     var nums = out.map(function (s) { return /^\d+$/.test(s.registro) ? Number(s.registro) : null; });
     var firstN = nums[0] != null ? nums[0] : 1;
     S.pendingImport = { students: out, meta: meta, firstN: firstN };
-    var malos = out.filter(function (s) { return !runValid(s.run); }).length;
+    var malos = out.filter(function (s) { return !runValid(s.run) && !runEsIPE(s.run); }).length;
+    var ipes = out.filter(function (s) { return runEsIPE(s.run); }).length;
     var cfgRows = '';
     if (meta) {
       var campos = [['colegio', 'Establecimiento'], ['rbd', 'RBD'], ['region', 'Región'], ['comuna', 'Comuna'], ['directora', 'Director(a)'], ['ciudad', 'Lugar']];
@@ -649,7 +795,8 @@
     var otroCurso = meta && meta.nivelCurso === 'otro';
     $('#importInfo').innerHTML =
       '<div class="imp-head"><b>' + out.length + '</b> estudiantes detectados en <i>' + esc(fileName) + '</i><br>Se agregarán a <b>' +
-      Licencia.NIVELES[S.nivel].curso + ' ' + esc(S.anio) + '</b>' + (malos ? ' <span class="chip warn">' + malos + ' con R.U.N. a revisar</span>' : '') + '</div>' +
+      Licencia.NIVELES[S.nivel].curso + ' ' + esc(S.anio) + '</b>' + (malos ? ' <span class="chip warn">' + malos + ' con R.U.N. a revisar</span>' : '') +
+      (ipes ? ' <span class="chip ipe">' + ipes + ' con IPE (100.000.000…)</span>' : '') + '</div>' +
       (cursos.length ? '<div class="kvs mt-s">' + cursos.map(function (c) { return '<span class="kv"><small>' + c[1] + ' estudiantes</small>' + esc(c[0]) + '</span>'; }).join('') + '</div>' : '') +
       (otroCurso ? '<p class="chip warn mt-s">Esta lista es de ' + esc(meta.curso) + ': las licencias son solo para 4° Medio y 8° Básico. Para diplomas use el módulo Diplomas.</p>' : '') +
       ordenNombresHtml(out, 'ordenLic') +
@@ -707,7 +854,8 @@
 
   function parsePdf(buf) {
     return pdfLines(buf).then(function (lines) {
-      var meta = {}, students = [], RUN = /^\d{1,2}\.?\d{3}\.?\d{3}-?[\dkK]$/;
+      // RUN normal (hasta 99.999.999-9), IPE (100.000.000 o más) o el genérico "100.000-000"
+      var meta = {}, students = [], RUN = /^(\d{1,3}\.?\d{3}\.?\d{3}-?[\dkK]|\d{3}\.?\d{3}-\d{3})$/;
       var tc = function (s) { return titleCase(String(s || '').replace(/\s+/g, ' ').trim()); };
       lines.forEach(function (l, li) {
         var t = l.text;
@@ -1014,9 +1162,9 @@
     var list = alumnosFiltrados();
     $('#alumTable tbody').innerHTML = list.map(function (a) {
       return '<tr data-id="' + esc(a.id) + '" class="' + (S.dipSel[a.id] ? 'row-sel' : '') + '"><td><input type="checkbox" class="dsel"' + (S.dipSel[a.id] ? ' checked' : '') + '></td>' +
-        '<td class="name">' + esc(a.nombre) + penBtn() + '</td><td><span class="chip curso">' + esc(a.curso) + '</span></td><td>' + esc(runFormat(a.run)) + '</td>' +
+        '<td class="name">' + esc(a.nombre) + penBtn() + '</td><td><span class="chip curso">' + esc(a.curso) + '</span></td><td>' + esc(runFormat(a.run)) + (runEsIPE(a.run) ? runChip(a.run) : '') + '</td>' +
         '<td>' + (a.diplomas ? '<span class="chip ok">' + a.diplomas + ' diploma' + (a.diplomas > 1 ? 's' : '') + '</span>' : '<span class="muted">—</span>') + '</td>' +
-        '<td class="actions"><button class="link" data-act="edit">Editar</button><button class="link danger" data-act="del">Quitar</button></td></tr>';
+        '<td class="actions"><button class="link" data-act="edit">Editar</button><button class="link danger" data-act="del">Eliminar</button></td></tr>';
     }).join('');
     $('#alumEmpty').classList.toggle('hidden', list.length > 0);
     $('#alumEmpty').textContent = S.alumnos.length ? 'No hay alumnos con este filtro.' : 'Aún no hay alumnos cargados para ' + S.anio + '. Cargue la lista de todos los cursos.';
@@ -1064,7 +1212,7 @@
       { name: 'curso', label: 'Curso', value: a.curso, required: true },
       { name: 'run', label: 'R.U.N.', value: runFormat(a.run) }
     ]).then(function (v) { if (v) { v.run = v.run ? runFormat(v.run) : ''; guardar(v); } });
-    confirmDlg('Quitar alumno', '¿Quitar a <b>' + esc(a.nombre) + '</b> de la lista? Sus diplomas ya emitidos se mantienen en el archivo.').then(function (ok) {
+    confirmDlg('Eliminar alumno', '¿Eliminar a <b>' + esc(a.nombre) + '</b> de la lista? Sus diplomas ya emitidos se mantienen en el archivo.').then(function (ok) {
       if (ok) api('deleteAlumno', { id: a.id }).then(loadDiplomas).catch(function (err) { toast(err.message, true); });
     });
   });
@@ -1075,6 +1223,17 @@
     });
   });
   $('#btnDipClear').addEventListener('click', function () { S.dipSel = {}; renderAlumnos(); });
+  $('#btnDipDel').addEventListener('click', function () {
+    var ids = Object.keys(S.dipSel); if (!ids.length) return;
+    var nom = S.alumnos.filter(function (a) { return S.dipSel[a.id]; }).map(function (a) { return a.nombre; });
+    confirmDlg('Eliminar alumnos', '¿Eliminar de la lista a <b>' + ids.length + '</b> alumno' + (ids.length > 1 ? 's' : '') + '?<br><small class="muted">' +
+      esc(nom.slice(0, 6).join(', ')) + (nom.length > 6 ? '…' : '') + '</small><br>Los diplomas ya emitidos se mantienen en el archivo.').then(function (ok) {
+      if (!ok) return;
+      busy(true, 'Eliminando…');
+      api('deleteAlumno', { ids: ids }).then(function () { S.dipSel = {}; toast(ids.length + ' alumno(s) eliminado(s)'); return loadDiplomas(); })
+        .catch(function (e) { toast(e.message, true); }).then(function () { busy(false); });
+    });
+  });
 
   // --- carga de la lista (Excel/CSV con curso, o nómina PDF de un curso) ---
   var dDrop = $('#dipDrop');
@@ -1192,25 +1351,50 @@
     S.users = list;
     $('#userTable tbody').innerHTML = list.map(function (u) {
       var me = u.id === S.user.id;
-      return '<tr data-id="' + esc(u.id) + '"><td class="name">' + esc(u.nombre) + (me ? ' <span class="chip pend">usted</span>' : '') + '</td><td>' + esc(u.email) + '</td><td>' +
-        (u.rol === 'admin' ? 'Administrador' : 'Usuario') + '</td><td>' + (u.activo ? '<span class="chip ok">Sí</span>' : '<span class="chip pend">No</span>') +
-        '</td><td class="actions"><button class="link" data-act="pass">Clave</button>' +
-        (me ? '' : '<button class="link" data-act="toggle">' + (u.activo ? 'Desactivar' : 'Activar') + '</button><button class="link danger" data-act="del">Eliminar</button>') + '</td></tr>';
+      return '<tr data-id="' + esc(u.id) + '"><td class="name">' + avatarHtml(u.nombre, 'sm') + esc(u.nombre) + (me ? ' <span class="chip pend">usted</span>' : '') + '</td><td>' +
+        (u.email ? esc(u.email) : '<span class="chip warn">sin correo</span>') + '</td><td>' +
+        (u.rol === 'admin' ? 'Administrador' : 'Usuario') + '</td><td>' +
+        (!u.activo ? '<span class="chip pend">Inactivo</span>' : u.cambiarClave ? '<span class="chip warn" title="Aún no crea su clave personal">Invitación pendiente</span>' : '<span class="chip ok">Activo</span>') +
+        '</td><td class="actions"><button class="link" data-act="edit">Editar</button>' +
+        (me ? '' : '<button class="link" data-act="inv" title="Genera una nueva clave provisoria y la envía a su correo">Enviar clave provisoria</button>' +
+          '<button class="link" data-act="toggle">' + (u.activo ? 'Desactivar' : 'Activar') + '</button><button class="link danger" data-act="del">Eliminar</button>') + '</td></tr>';
     }).join('');
   }
+  function paginaUrl() { return location.origin + location.pathname; }
+  // Resultado de una invitación: confirma el envío o, si el correo no salió, muestra la clave UNA vez para entregarla en persona
+  function avisoInvitacion(r, nombre) {
+    renderUsers(r.lista);
+    if (r.enviado) return openDlg('Invitación enviada', '<p>Se envió a <b>' + esc(r.email) + '</b> una clave provisoria para <b>' + esc(nombre) +
+      '</b>. Al ingresar, la página le pedirá crear su clave personal.</p><p class="muted small">Si no lo ve, pídale revisar la carpeta de spam.</p>');
+    return openDlg('Entregue esta clave provisoria', '<p>' + (DEMO ? 'En modo demostración no se envían correos.' : 'No se pudo enviar el correo a <b>' + esc(r.email) + '</b>.') +
+      ' Entregue esta clave a <b>' + esc(nombre) + '</b>; deberá cambiarla al ingresar:</p><p class="temp-pass">' + esc(r.clave) + '</p>' +
+      '<p class="muted small">Por seguridad no se volverá a mostrar.</p>');
+  }
   $('#userForm').addEventListener('submit', function (e) {
-    e.preventDefault(); var f = e.target;
-    busy(true, 'Creando usuario…');
-    api('createUser', { nombre: f.nombre.value, email: f.email.value, password: f.password.value, rol: f.rol.value })
-      .then(function (l) { renderUsers(l); f.reset(); toast('Usuario creado'); })
+    e.preventDefault(); var f = e.target, nombre = f.nombre.value.trim();
+    busy(true, 'Creando usuario y enviando invitación…');
+    api('createUser', { nombre: nombre, email: f.email.value.trim(), rol: f.rol.value, pageUrl: paginaUrl() })
+      .then(function (r) { f.reset(); busy(false); return avisoInvitacion(r, nombre); })
       .catch(function (err) { toast(err.message, true); }).then(function () { busy(false); });
   });
   $('#userTable tbody').addEventListener('click', function (e) {
     var b = e.target.closest('button[data-act]'); if (!b) return;
     var u = S.users.filter(function (x) { return x.id === b.closest('tr').dataset.id; })[0];
     var p;
-    if (b.dataset.act === 'pass') p = formDlg('Nueva clave para ' + u.nombre, [{ name: 'password', label: 'Nueva clave (mín. 8 caracteres)', type: 'password', required: true, minlength: 8 }])
-      .then(function (v) { return v && api('updateUser', { id: u.id, password: v.password }); });
+    if (b.dataset.act === 'inv') {
+      return confirmDlg('Enviar clave provisoria', 'Se generará una <b>nueva clave provisoria</b> para <b>' + esc(u.nombre) + '</b> y se enviará a <b>' + esc(u.email || '(sin correo)') +
+        '</b>. Su clave actual dejará de funcionar.').then(function (ok) {
+        if (!ok) return;
+        busy(true, 'Enviando…');
+        api('reenviarInvitacion', { id: u.id, pageUrl: paginaUrl() }).then(function (r) { busy(false); return avisoInvitacion(r, u.nombre); })
+          .catch(function (err) { toast(err.message, true); }).then(function () { busy(false); });
+      });
+    }
+    if (b.dataset.act === 'edit') p = formDlg('Editar usuario', [
+      { name: 'nombre', label: 'Nombre completo', value: u.nombre, required: true },
+      { name: 'email', label: 'Correo', type: 'email', value: u.email },
+      { name: 'rol', label: 'Rol', type: 'select', value: u.rol, options: [['usuario', 'Usuario'], ['admin', 'Administrador']] }
+    ]).then(function (v) { return v && api('updateUser', { id: u.id, nombre: v.nombre, email: v.email, rol: v.rol }); });
     else if (b.dataset.act === 'toggle') p = api('updateUser', { id: u.id, activo: !u.activo });
     else p = confirmDlg('Eliminar usuario', '¿Eliminar a <b>' + esc(u.nombre) + '</b>?').then(function (ok) { return ok && api('deleteUser', { id: u.id }); });
     p.then(function (l) { if (l) { renderUsers(l); toast('Cambios guardados'); } }).catch(function (err) { toast(err.message, true); });

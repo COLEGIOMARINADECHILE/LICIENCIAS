@@ -6,8 +6,8 @@
 <title>Licencias y Diplomas</title>
 <meta name="robots" content="noindex">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Cormorant+Garamond:ital,wght@1,600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=11">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Cormorant+Garamond:ital,wght@1,600&family=Great+Vibes&family=Cinzel+Decorative:wght@700&family=Crimson+Text:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css?v=13">
 </head>
 <body>
 
@@ -48,7 +48,7 @@
     <button type="button" class="link forgot" id="btnOlvide">¿Olvidó su clave?</button>
     </div>
     <p class="error" id="loginError"></p>
-    <p class="ver">Versión 11 · cursos ordenados y alta de funcionarios por nombre</p>
+    <p class="ver">Versión 13 · modelos en PDF y firmas adicionales</p>
     <p class="demo-note hidden" id="demoNote">Modo demostración: los datos se guardan solo en este navegador y se acepta cualquier clave. Configure <code>config.js</code> para usar Apps Script.</p>
   </form>
 </section>
@@ -66,6 +66,7 @@
       <button data-view="archivo" data-mod="lic">Archivo</button>
       <button data-view="diplomas" data-mod="dip">Generar diplomas</button>
       <button data-view="dipArchivo" data-mod="dip">Diplomas emitidos</button>
+      <button data-view="modelos" class="admin-only">Modelos</button>
       <button data-view="colegio" class="admin-only">Datos del colegio</button>
       <button data-view="usuarios" class="admin-only">Usuarios</button>
     </nav>
@@ -159,6 +160,7 @@
 
       <div class="actionbar">
         <span id="selInfo">0 seleccionados</span>
+        <label class="inline mod-pick hidden">Modelo <select id="modLic"></select></label>
         <button class="btn ghost danger" id="btnDelSel" title="Eliminar de la lista a los estudiantes seleccionados">Eliminar</button>
         <button class="btn ghost" id="btnPreview">Vista previa</button>
         <button class="btn primary" id="btnEmitir">3. Generar PDF y guardar</button>
@@ -200,8 +202,8 @@
       </div>
 
       <div class="grid2">
-        <div class="card">
-          <h3>1. Cargar lista de alumnos (todos los cursos)</h3>
+        <div class="card admin-only">
+          <h3>1. Cargar lista de alumnos (todos los cursos) <span class="chip pend">solo administrador</span></h3>
           <p class="muted"><b>“Lista de Curso”</b> del SIGE en PDF: seleccione <b>todas las de una vez</b> (una por curso; el curso se lee del PDF). También acepta Excel/CSV con columnas <b>curso</b>, <b>nombre</b> y <b>run</b>. <a href="plantilla_diplomas.csv" download>Plantilla</a></p>
           <div class="drop" id="dipDrop">
             <input type="file" id="dipFile" multiple accept=".pdf,.xlsx,.xls,.csv,application/pdf">
@@ -226,6 +228,7 @@
         <div class="card">
           <h3>2. Motivo y fecha del diploma</h3>
           <div class="form-grid">
+            <label class="span2 mod-pick hidden">Modelo de diploma<select id="modDip"></select></label>
             <label class="span2">Motivo
               <select id="dipMotivoSel">
                 <option>Su destacada participación</option>
@@ -240,6 +243,8 @@
             </label>
             <label class="span2 hidden" id="dipOtroWrap">Escriba el motivo<input id="dipMotivoOtro" maxlength="140" placeholder="Ej.: Su destacada participación en la Feria Científica 2026"></label>
             <label>Fecha del diploma<input type="date" id="dipFecha"></label>
+            <div class="span2 firmas-res"><span class="fr-ico">✒</span><span id="firmasRes">Firma: la directora</span>
+              <button type="button" class="link" id="btnFirmas">Agregar o cambiar firmas</button></div>
             <div class="end"><button class="btn ghost" id="btnDipPreview" type="button">Vista previa</button></div>
           </div>
           <p class="muted small">El diploma lleva: nombre del alumno, curso, motivo, lugar y fecha, y nombre de la directora.</p>
@@ -248,16 +253,21 @@
 
       <div class="card">
         <div class="card-head">
-          <h3>3. Seleccione los alumnos <span class="count" id="alumCount"></span></h3>
+          <h3>3. Elija el curso y seleccione los alumnos <span class="count" id="alumCount"></span></h3>
           <div class="row">
-            <select id="dipCurso" style="width:auto"></select>
-            <input type="search" id="dipSearch" placeholder="Buscar alumno" style="width:200px">
-            <button class="btn ghost sm admin-only" id="btnDelCurso">Eliminar curso</button>
+            <input type="search" id="dipSearch" placeholder="Buscar alumno en todos los cursos" style="width:240px">
           </div>
         </div>
-        <div class="table-wrap">
+        <div class="curso-pick" id="dipCursos"></div>
+        <div class="curso-head hidden" id="dipCursoHead">
+          <button class="btn ghost sm" id="btnVolverCursos">← Todos los cursos</button>
+          <b id="dipCursoTitulo"></b>
+          <span class="spacer"></span>
+          <button class="btn ghost sm danger admin-only" id="btnDelCurso">Eliminar curso</button>
+        </div>
+        <div class="table-wrap" id="alumWrap">
           <table class="tbl" id="alumTable">
-            <thead><tr><th><input type="checkbox" id="dipChkAll" title="Seleccionar los mostrados"></th><th>Nombre</th><th>Curso</th><th>R.U.N.</th><th>Diplomas</th><th></th></tr></thead>
+            <thead><tr><th><input type="checkbox" id="dipChkAll" title="Seleccionar los mostrados"></th><th>N°</th><th>Nombre</th><th>Curso</th><th>R.U.N.</th><th>Diplomas</th><th class="admin-only"></th></tr></thead>
             <tbody></tbody>
           </table>
           <p class="empty hidden" id="alumEmpty">Aún no hay alumnos cargados para este año. Cargue la lista de todos los cursos.</p>
@@ -267,7 +277,7 @@
       <div class="actionbar dip-actions hidden" id="dipActionbar">
         <span id="dipSelInfo">0 seleccionados</span>
         <button class="btn ghost" id="btnDipClear">Limpiar selección</button>
-        <button class="btn ghost danger" id="btnDipDel" title="Eliminar de la lista a los alumnos seleccionados">Eliminar alumnos</button>
+        <button class="btn ghost danger admin-only" id="btnDipDel" title="Eliminar de la lista a los alumnos seleccionados">Eliminar alumnos</button>
         <button class="btn primary" id="btnDipEmitir">Generar diplomas y guardar</button>
       </div>
     </div>
@@ -297,6 +307,33 @@
             <tbody></tbody>
           </table>
           <p class="empty hidden" id="dipEmpty">Aún no hay diplomas emitidos este año.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------- MODELOS (solo administrador) ---------- -->
+    <div class="view hidden" id="view-modelos">
+      <div class="grid2">
+        <form class="card" id="modForm">
+          <h3>Subir un modelo nuevo</h3>
+          <p class="muted">Suba el diseño en <b>PDF tamaño carta</b>. Queda guardado en Drive y todos los usuarios podrán elegirlo al generar licencias o diplomas.</p>
+          <div class="form-grid">
+            <label>Tipo<select name="tipo"><option value="diploma">Diploma</option><option value="licencia">Licencia</option></select></label>
+            <label>Nombre del modelo<input name="nombre" required maxlength="80" placeholder="Ej.: Diploma aniversario"></label>
+            <fieldset class="span2 modo-pick">
+              <legend>¿Qué trae el PDF?</legend>
+              <label class="check"><input type="radio" name="modo" value="campos" checked> <span><b>El diseño completo, con espacios en blanco</b><br><small class="muted">Usted ubica dónde va el nombre, la fecha, la directora, etc.</small></span></label>
+              <label class="check"><input type="radio" name="modo" value="fondo"> <span><b>Solo el marco o fondo</b><br><small class="muted">La página escribe encima todos los textos del diseño del sistema (solo hojas horizontales).</small></span></label>
+            </fieldset>
+            <label class="check span2" id="modLogosWrap"><input type="checkbox" name="logos"> Agregar también el escudo de Chile y la insignia del colegio</label>
+            <label class="span2">Archivo PDF<input type="file" name="archivo" accept="application/pdf,.pdf" required></label>
+          </div>
+          <div class="row end mt"><button class="btn primary" type="submit">Subir modelo</button></div>
+        </form>
+        <div class="card">
+          <h3>Modelos guardados <span class="count" id="modCount"></span></h3>
+          <p class="muted small">El "Diseño del sistema" siempre está disponible. Si elimina un modelo, lo ya emitido con él se descarga con el diseño del sistema.</p>
+          <div id="modList" class="mod-list"></div>
         </div>
       </div>
     </div>
@@ -370,6 +407,7 @@
             </label>
             <label>Rol <select name="rol"><option value="usuario">Usuario</option><option value="admin">Administrador</option></select></label>
             <div class="end"><button class="btn primary" type="submit">Autorizar</button></div>
+            <label class="check span2"><input type="checkbox" name="bienvenida" checked> Enviarle un correo de bienvenida <small class="muted">(cómo ingresar con su correo institucional, sin crear clave, y confidencialidad de los datos)</small></label>
           </div>
           <details class="bulk mt-s">
             <summary>Autorizar varios de una vez (pegar lista)</summary>
@@ -400,6 +438,25 @@
   </main>
 </section>
 
+<!-- ============ EDITOR DE CAMPOS DE UN MODELO ============ -->
+<dialog id="modDlg" class="mod-dlg">
+  <div class="md-head">
+    <h3 id="mdTitulo">Ubicar campos</h3>
+    <span class="spacer"></span>
+    <button type="button" class="btn ghost sm" id="mdPrev">Vista previa PDF</button>
+    <button type="button" class="btn ghost sm" id="mdCancel">Cancelar</button>
+    <button type="button" class="btn primary sm" id="mdSave">Guardar</button>
+  </div>
+  <div class="md-body">
+    <div class="md-page-wrap"><div class="md-page" id="mdPage"><img id="mdImg" alt="Diseño del modelo"></div></div>
+    <aside class="md-side">
+      <p class="muted small"><b>1.</b> Marque los datos que deben aparecer. <b>2.</b> Arrástrelos a su lugar sobre el diseño (o use las flechas del teclado). <b>3.</b> Ajuste tamaño, letra y color.</p>
+      <div id="mdCampos" class="md-campos"></div>
+      <div id="mdProps" class="md-props"></div>
+    </aside>
+  </div>
+</dialog>
+
 <!-- ============ DIÁLOGO ============ -->
 <dialog id="dlg">
   <form method="dialog" id="dlgForm">
@@ -417,8 +474,8 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="config.js?v=11"></script>
-<script src="licencia.js?v=11"></script>
-<script src="app.js?v=11"></script>
+<script src="config.js?v=13"></script>
+<script src="licencia.js?v=13"></script>
+<script src="app.js?v=13"></script>
 </body>
 </html>

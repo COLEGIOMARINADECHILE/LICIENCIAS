@@ -99,7 +99,7 @@
       method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body)
     }).then(function (r) { return r.json(); }).catch(function () {
       // "Failed to fetch" o respuesta no-JSON: Google devolvió una página de error en vez de datos
-      var e = new Error(/^(enviarInvitacion|solicitarCodigo)$/.test(action)
+      var e = new Error(/^(enviarInvitacion|solicitarCodigo|enviarBienvenida)$/.test(action)
         ? 'Google no permitió enviar el correo: falta autorizar el permiso de correo en Apps Script (en el editor ejecute la función "setup" y acepte "Enviar correo electrónico en su nombre").'
         : 'No se pudo conectar con Apps Script. Revise su conexión a internet e intente de nuevo.');
       e.red = true; throw e;
@@ -141,6 +141,8 @@
       });
       return { agregados: add, omitidos: om, lista: listStud(d, q) };
     }
+    var DEMO_PDF = {};
+    function soloAdmin(u) { if (u.rol !== 'admin') throw new Error('Solo un administrador puede hacer esto'); }
     var A = {
       listUsers: function (d) { return d.users.filter(function (u) { return u.activo && u.conClave !== false; }).map(function (u) { return { id: u.id, nombre: u.nombre }; }); },
       login: function (d, q) {
@@ -172,7 +174,7 @@
         return st.map(function (s) {
           var rec = { nivel: s.nivel, anio: s.anio, registro: s.registro, nombre: s.nombre, run: s.run, sexo: s.sexo,
             colegio: c.colegio, rbd: c.rbd, region: c.region, provincia: c.provincia, comuna: c.comuna, anioEscolar: s.anio,
-            directora: c.directora, cargo: c.cargo || 'Director(a) del Establecimiento', ciudad: c.ciudad, fecha: c.fecha };
+            directora: c.directora, cargo: c.cargo || 'Director(a) del Establecimiento', ciudad: c.ciudad, fecha: c.fecha, modeloId: q.modeloId || '' };
           d.lic = d.lic.filter(function (l) { return l.studentId !== s.id; });
           d.lic.push({ id: id('l-'), studentId: s.id, nivel: s.nivel, anio: s.anio, registro: s.registro, nombre: s.nombre, run: s.run, emitida: now, emitidaPor: u.nombre, datos: rec });
           return rec;
@@ -190,7 +192,7 @@
           .sort(function (a, b) { return ordenCurso(a.curso, b.curso) || (a.orden || 1e9) - (b.orden || 1e9) || a.nombre.localeCompare(b.nombre); });
       },
       importAlumnos: function (d, q, u) {
-        d.alumnos = d.alumnos || []; var seen = {}, add = 0, om = 0;
+        soloAdmin(u); d.alumnos = d.alumnos || []; var seen = {}, add = 0, om = 0;
         var del = d.alumnos.filter(function (a) { return a.anio === String(q.anio); }), orden = maxOrden(del);
         del.forEach(function (a) { seen[claveAlumno(a.run, a.nombre, a.curso)] = 1; });
         (q.alumnos || []).forEach(function (r) {
@@ -202,16 +204,16 @@
         });
         return { agregados: add, omitidos: om };
       },
-      deleteAlumno: function (d, q) { var ids = q.ids || [q.id]; d.alumnos = (d.alumnos || []).filter(function (a) { return ids.indexOf(a.id) < 0; }); return ids.length; },
-      deleteCurso: function (d, q) { d.alumnos = (d.alumnos || []).filter(function (a) { return !(a.anio === String(q.anio) && a.curso === q.curso); }); return true; },
+      deleteAlumno: function (d, q, u) { soloAdmin(u); var ids = q.ids || [q.id]; d.alumnos = (d.alumnos || []).filter(function (a) { return ids.indexOf(a.id) < 0; }); return ids.length; },
+      deleteCurso: function (d, q, u) { soloAdmin(u); d.alumnos = (d.alumnos || []).filter(function (a) { return !(a.anio === String(q.anio) && a.curso === q.curso); }); return true; },
       emitirDiplomas: function (d, q, u) {
         d.dips = d.dips || []; var c = d.config, now = new Date().toISOString();
         if (!q.motivo) throw new Error('Indique el motivo del diploma');
         if (!c.directora) throw new Error('Complete el nombre de la directora en "Datos del colegio"');
         return (d.alumnos || []).filter(function (a) { return q.ids.indexOf(a.id) >= 0; }).map(function (a) {
           var rec = { tipo: 'diploma', nombre: a.nombre, curso: a.curso, run: a.run, motivo: q.motivo, fecha: q.fecha, colegio: c.colegio || '',
-            directora: c.directora, cargo: c.cargo || 'Director(a) del Establecimiento', ciudad: c.ciudad || '' };
-          d.dips.push({ id: id('d-'), anio: a.anio, alumnoId: a.id, curso: a.curso, nombre: a.nombre, run: a.run, motivo: q.motivo, fecha: q.fecha, datos: rec, emitido: now, emitidoPor: u.nombre });
+            directora: c.directora, cargo: c.cargo || 'Director(a) del Establecimiento', ciudad: c.ciudad || '', modeloId: q.modeloId || '', firmas: (q.firmas || []).filter(function (f) { return f && f.nombre; }) };
+          d.dips.push({ id: id('d-'), anio: a.anio, alumnoId: a.id, curso: a.curso, nombre: a.nombre, run: a.run, motivo: q.motivo, fecha: q.fecha, datos: rec, emitido: now, emitidoPor: u.nombre, emitidoPorId: u.id });
           return rec;
         });
       },
@@ -219,8 +221,8 @@
         return (d.dips || []).filter(function (x) { return x.anio === String(q.anio); })
           .sort(function (a, b) { return String(b.emitido).localeCompare(String(a.emitido)) || a.nombre.localeCompare(b.nombre); });
       },
-      deleteDiploma: function (d, q) { d.dips = (d.dips || []).filter(function (x) { return x.id !== q.id; }); return true; },
-      updateAlumno: function (d, q) {
+      deleteDiploma: function (d, q, u) { var x0 = (d.dips || []).filter(function (x) { return x.id === q.id; })[0]; if (u.rol !== 'admin' && x0 && x0.emitidoPorId !== u.id) throw new Error('Solo puede eliminar los diplomas que usted emitió'); d.dips = (d.dips || []).filter(function (x) { return x.id !== q.id; }); return true; },
+      updateAlumno: function (d, q, u) { soloAdmin(u);
         var a = (d.alumnos || []).filter(function (x) { return x.id === q.id; })[0]; Object.assign(a, q.alumno);
         if (q.alumno.curso !== undefined) a.curso = cursoCanonico(q.alumno.curso);
         return true;
@@ -252,6 +254,23 @@
         return { lista: d.users, id: u.id, email: u.email, clave: clave };
       },
       enviarInvitacion: function () { return { enviado: false }; },
+      listModelos: function (d) { return d.modelos || []; },
+      getModeloArchivo: function (d, q) {
+        var u = DEMO_PDF[q.id] || (function () { try { return localStorage.getItem('lic_demo_pdf_' + q.id); } catch (e) { return null; } })();
+        if (!u) throw new Error('El PDF de este modelo no está en este navegador (modo demostración)');
+        return { dataUrl: u };
+      },
+      subirModelo: function (d, q, u) {
+        soloAdmin(u); d.modelos = d.modelos || [];
+        var m = { id: id('m-'), tipo: q.tipo, nombre: q.nombre, modo: q.modo, orient: q.orient, logos: !!q.logos, campos: q.campos || [], creado: new Date().toISOString(), creadoPor: u.nombre };
+        DEMO_PDF[m.id] = q.dataUrl; try { localStorage.setItem('lic_demo_pdf_' + m.id, q.dataUrl); } catch (e) {}
+        d.modelos.push(m); return m;
+      },
+      guardarModelo: function (d, q, u) {
+        soloAdmin(u); var m = (d.modelos || []).filter(function (x) { return x.id === q.id; })[0];
+        ['nombre', 'modo', 'logos', 'campos'].forEach(function (k) { if (q[k] != null) m[k] = q[k]; }); return d.modelos;
+      },
+      eliminarModelo: function (d, q, u) { soloAdmin(u); d.modelos = (d.modelos || []).filter(function (x) { return x.id !== q.id; }); return d.modelos; },
       // demo: simula Google con el correo escrito (en producción lo valida Google)
       loginGoogle: function (d, q) {
         var email = String(q.demoEmail || '').toLowerCase(), dom = '@' + (window.DOMINIO_CORREO || 'andaliensur.cl');
@@ -282,7 +301,9 @@
             d.users.push({ id: id('u-'), nombre: x[1] || e.split('@')[0], email: e, rol: q.rol, activo: true, conClave: false }); add++;
           });
         });
-        return { lista: d.users, agregados: add, omitidos: om, invalidos: inv };
+        return { lista: d.users, agregados: add, omitidos: om, invalidos: inv, nuevosIds: d.users.slice(-add).map(function (u) { return u.id; }).slice(0, add) };
+      },
+      enviarBienvenida: function () { return { enviados: [], fallidos: [], demo: true };
       },
       solicitarCodigo: function (d, q) {
         var u = d.users.filter(function (x) { return x.id === q.userId; })[0];
@@ -486,6 +507,7 @@
     $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
     aplicarCurso();
     irA('inicio');
+    loadModelos();
     return loadConfig().then(function () { renderAnios(); resumenInicio(); return loadStudents(); });
   }
 
@@ -533,7 +555,7 @@
     irA(mod === 'dip' ? 'diplomas' : 'emitir');
   }
   function irA(view) {
-    if ((view === 'colegio' || view === 'usuarios') && !(S.user && S.user.rol === 'admin')) view = S.modulo === 'dip' ? 'diplomas' : S.modulo === 'lic' ? 'emitir' : 'inicio';
+    if ((view === 'colegio' || view === 'usuarios' || view === 'modelos') && !(S.user && S.user.rol === 'admin')) view = S.modulo === 'dip' ? 'diplomas' : S.modulo === 'lic' ? 'emitir' : 'inicio';
     if (VISTA_MOD[view]) S.modulo = VISTA_MOD[view];
     S.view = view;
     var enInicio = view === 'inicio', dip = S.modulo === 'dip' && !enInicio;
@@ -554,6 +576,7 @@
     if (view !== 'diplomas') $('#dipActionbar').classList.add('hidden'); else updDipSel();
     if (view === 'usuarios') loadUsersAdmin();
     if (view === 'colegio') fillConfigForm();
+    if (view === 'modelos') { renderModelos(); loadModelos(); }
     if (enInicio) resumenInicio();
     window.scrollTo(0, 0);
   }
@@ -1115,27 +1138,292 @@
     }).catch(function (e) { toast(e.message, true); }).then(function () { busy(false); });
   });
 
+  /* ======================= Modelos (diseños en PDF cargados por el administrador) ======================= */
+  S.modelos = [];
+  var FONDOS = {}; // id -> Promise del fondo ya dibujado (imagen), para no descargarlo dos veces
+  function lsGet(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  function loadModelos() {
+    return api('listModelos').then(function (l) {
+      S.modelos = l || []; renderModeloSelects();
+      if (S.view === 'modelos') renderModelos();
+    }).catch(function () {});
+  }
+  function modeloElegido(tipo) { var sel = $(tipo === 'diploma' ? '#modDip' : '#modLic'); return sel ? sel.value : ''; }
+  // Selectores "Modelo" en Emitir (licencias) y en Diplomas; recuerda el último elegido en este equipo
+  function renderModeloSelects() {
+    [['licencia', '#modLic'], ['diploma', '#modDip']].forEach(function (t) {
+      var sel = $(t[1]); if (!sel) return;
+      var prev = sel.value || lsGet('lic_mod_' + t[0]);
+      var ms = S.modelos.filter(function (m) { return m.tipo === t[0]; });
+      sel.innerHTML = '<option value="">Diseño del sistema</option>' + ms.map(function (m) {
+        return '<option value="' + esc(m.id) + '">' + esc(m.nombre) + '</option>'; }).join('');
+      sel.value = ms.some(function (m) { return m.id === prev; }) ? prev : '';
+      sel.closest('.mod-pick').classList.toggle('hidden', !ms.length);
+    });
+  }
+  ['#modLic', '#modDip'].forEach(function (s, i) {
+    $(s).addEventListener('change', function () { lsSet('lic_mod_' + (i ? 'diploma' : 'licencia'), this.value); });
+  });
+  // Dibuja la 1ª página de un PDF como imagen (fondo del modelo). maxPx ≈ 2600 px de ancho: ~235 ppp en carta.
+  function pdfAImagen(buf, maxPx) {
+    return loadPdfJs().then(function () { return pdfjsLib.getDocument({ data: buf }).promise; }).then(function (pdf) {
+      return pdf.getPage(1);
+    }).then(function (page) {
+      var v0 = page.getViewport({ scale: 1 }), k = maxPx / Math.max(v0.width, v0.height), vp = page.getViewport({ scale: k });
+      var c = document.createElement('canvas'); c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+      var g = c.getContext('2d'); g.fillStyle = '#ffffff'; g.fillRect(0, 0, c.width, c.height);
+      return page.render({ canvasContext: g, viewport: vp }).promise.then(function () {
+        return { data: c.toDataURL('image/jpeg', 0.9), w: c.width, h: c.height, fmt: 'JPEG', orient: c.width >= c.height ? 'landscape' : 'portrait' };
+      });
+    });
+  }
+  function fondoDe(id) {
+    if (!FONDOS[id]) {
+      FONDOS[id] = api('getModeloArchivo', { id: id }).then(function (r) { return fetch(r.dataUrl); })
+        .then(function (x) { return x.arrayBuffer(); })
+        .then(function (buf) { return pdfAImagen(buf, 2600); })
+        .then(function (img) { img.alias = 'fondo' + id; return img; })
+        .catch(function (e) { delete FONDOS[id]; throw e; });
+    }
+    return FONDOS[id];
+  }
+  // Modelos que usan estos documentos (r.modeloId), con su fondo listo. Los eliminados se omiten (diseño del sistema).
+  function modelosPara(records) {
+    var ids = {}; records.forEach(function (r) { if (r.modeloId) ids[r.modeloId] = 1; });
+    var lista = Object.keys(ids).map(function (id) { return S.modelos.filter(function (m) { return m.id === id; })[0]; }).filter(Boolean);
+    if (!lista.length) return Promise.resolve({});
+    busy(true, 'Preparando el modelo…');
+    return Promise.all(lista.map(function (m) { return fondoDe(m.id).then(function (f) { return Object.assign({}, m, { fondo: f }); }); }))
+      .then(function (ms) { busy(false); var o = {}; ms.forEach(function (m) { o[m.id] = m; }); return o; },
+        function (e) { busy(false); toast('No se pudo cargar el modelo: ' + e.message + '. Se usará el diseño del sistema.', true); return {}; });
+  }
+  function pdfLic(records, c) {
+    return Promise.all([c ? Licencia.prepareAssets(c) : Promise.resolve(S.assets), modelosPara(records)]).then(function (r) {
+      return Licencia.build(records, r[0], Object.assign(printOpts(c), { modelos: r[1] }));
+    });
+  }
+  function pdfDip(records) {
+    return modelosPara(records).then(function (ms) { return Licencia.buildDiplomas(records, S.assets, Object.assign(printOpts(), { modelos: ms })); });
+  }
+  function abrirDoc(promesa) {
+    var w = window.open('', '_blank');
+    promesa.then(function (doc) { var url = doc.output('bloburl'); if (w) w.location.href = url; else window.location.href = url; })
+      .catch(function (e) { if (w) w.close(); toast(e.message, true); });
+  }
+
+  /* ---- Administrador: subir modelos y ubicar sus campos ---- */
+  var TIPO_TXT = { licencia: 'Licencia', diploma: 'Diploma' };
+  // Ubicación inicial razonable de los datos (el administrador la ajusta arrastrando)
+  var CAMPOS_INICIALES = {
+    diploma: [{ k: 'nombre', x: .5, y: .5, s: 36, f: 'script' }, { k: 'curso', x: .5, y: .58, s: 12, f: 'serif', st: 'bold' },
+      { k: 'motivo', x: .5, y: .67, s: 15, f: 'serif', st: 'bold' }, { k: 'lugarFecha', x: .29, y: .85, s: 12, f: 'serif', st: 'italic', w: .32 },
+      { k: 'directora', x: .71, y: .85, s: 12, f: 'serif', st: 'bold', w: .32 }],
+    licencia: [{ k: 'registro', x: .5, y: .42, s: 13, f: 'serif', st: 'bold' }, { k: 'nombre', x: .5, y: .55, s: 34, f: 'script' },
+      { k: 'run', x: .5, y: .64, s: 14, f: 'serif', st: 'bold' }, { k: 'lugarFecha', x: .29, y: .85, s: 12, f: 'serif', st: 'italic', w: .32 },
+      { k: 'directora', x: .71, y: .85, s: 12, f: 'serif', st: 'bold', w: .32 }]
+  };
+  function campoNuevo(k, i) { return { k: k, x: .5, y: Math.min(.9, .3 + i * .06), s: 14, f: 'serif', st: 'normal', c: '#081e48', a: 'center', w: .8 }; }
+  function completarCampo(c) { return Object.assign({ st: 'normal', c: '#081e48', a: 'center', w: .8 }, c); }
+
+  function renderModelos() {
+    $('#modCount').textContent = S.modelos.length ? '· ' + S.modelos.length : '';
+    $('#modList').innerHTML = S.modelos.length ? S.modelos.map(function (m) {
+      return '<div class="mod-item" data-id="' + esc(m.id) + '"><div class="mod-thumb"><img alt="" data-thumb="' + esc(m.id) + '"></div><div class="mod-info">' +
+        '<b>' + esc(m.nombre) + '</b><span><span class="chip curso">' + TIPO_TXT[m.tipo] + '</span> ' +
+        (m.modo === 'campos' ? m.campos.length + ' campos ubicados' : 'Marco/fondo con textos del sistema') + ' · ' + (m.orient === 'portrait' ? 'vertical' : 'horizontal') + '</span>' +
+        '<div class="mod-acts">' + (m.modo === 'campos' ? '<button class="link" data-act="campos">Ubicar campos</button>' : '') +
+        '<button class="link" data-act="prev">Vista previa</button><button class="link" data-act="ren">Renombrar</button><button class="link danger" data-act="del">Eliminar</button></div></div></div>';
+    }).join('') : '<p class="empty">Aún no hay modelos. Suba el primero con el formulario.</p>';
+    // miniaturas (se dibujan del PDF guardado)
+    S.modelos.forEach(function (m) {
+      fondoDe(m.id).then(function (f) { var im = $('img[data-thumb="' + m.id + '"]'); if (im) im.src = f.data; }).catch(function () {});
+    });
+  }
+  function muestra(tipo) {
+    var c = S.config, s = S.students[0] || {};
+    return tipo === 'diploma'
+      ? { nombre: (S.alumnos[0] || {}).nombre || 'María José Fuentes Rojas', curso: (S.alumnos[0] || {}).curso || '5° Básico A', motivo: motivoActual() || 'Su destacada participación',
+        fecha: $('#dipFecha').value || hoyISO(), ciudad: c.ciudad || 'Concepción', colegio: c.colegio || window.COLEGIO_NOMBRE || '', directora: c.directora || 'Nombre de la Directora', cargo: c.cargo,
+        firmas: S.firmas.length ? S.firmas : [{ nombre: 'Nombre Apellido', cargo: 'Profesor(a) Jefe' }, { nombre: 'Nombre Apellido', cargo: 'Inspector(a) General' }] }
+      : { nivel: S.nivel, anio: S.anio, registro: s.registro || '123', nombre: s.nombre || 'María José Fuentes Rojas', run: runFormat(s.run || '12.345.678-5'), sexo: s.sexo || 'F',
+        colegio: c.colegio || window.COLEGIO_NOMBRE || '', rbd: c.rbd || '4531', region: c.region || 'Biobío', provincia: c.provincia || 'Concepción', comuna: c.comuna || 'Concepción',
+        anioEscolar: S.anio, directora: c.directora || 'Nombre de la Directora', cargo: c.cargo, ciudad: c.ciudad || 'Concepción', fecha: c.fecha || hoyISO() };
+  }
+  function vistaModelo(m, campos) {
+    abrirDoc(fondoDe(m.id).then(function (f) {
+      var mod = Object.assign({}, m, { fondo: f, campos: campos || m.campos }), rec = muestra(m.tipo);
+      return (m.tipo === 'diploma' ? Licencia.buildDiplomas : Licencia.build)([rec], S.assets, Object.assign(printOpts(), { modelo: mod }));
+    }));
+  }
+  function leerDataUrl(file) {
+    return new Promise(function (res, rej) { var fr = new FileReader(); fr.onload = function () { res(fr.result); }; fr.onerror = rej; fr.readAsDataURL(file); });
+  }
+  $('#modForm').addEventListener('change', function (e) {
+    if (e.target.name === 'modo') $('#modLogosWrap').classList.toggle('hidden', e.target.value !== 'fondo');
+  });
+  $('#modLogosWrap').classList.add('hidden');
+  $('#modForm').addEventListener('submit', function (e) {
+    e.preventDefault(); var f = e.target, file = f.archivo.files[0];
+    if (!file) return;
+    if (file.size > 15 * 1024 * 1024) return toast('El PDF debe pesar menos de 15 MB', true);
+    var modo = f.querySelector('input[name="modo"]:checked').value, img;
+    busy(true, 'Leyendo el diseño…');
+    file.arrayBuffer().then(function (buf) {
+      if (String.fromCharCode.apply(null, new Uint8Array(buf.slice(0, 5))).indexOf('%PDF') !== 0) throw new Error('El archivo no es un PDF');
+      return pdfAImagen(buf, 2600);
+    }).then(function (im) {
+      img = im;
+      if (modo === 'fondo' && img.orient === 'portrait') { modo = 'campos'; toast('El PDF es vertical: se usará "ubicar campos"', true); }
+      return leerDataUrl(file);
+    }).then(function (dataUrl) {
+      busy(true, 'Guardando el modelo en Drive…');
+      return api('subirModelo', { tipo: f.tipo.value, nombre: f.nombre.value.trim(), modo: modo, orient: img.orient, logos: f.logos.checked,
+        campos: modo === 'campos' ? CAMPOS_INICIALES[f.tipo.value].map(completarCampo) : [], dataUrl: dataUrl.replace(/^data:[^;]*;/, 'data:application/pdf;') });
+    }).then(function (m) {
+      img.alias = 'fondo' + m.id; FONDOS[m.id] = Promise.resolve(img);
+      S.modelos.push(m); renderModeloSelects(); renderModelos(); f.reset(); $('#modLogosWrap').classList.add('hidden');
+      busy(false); toast('Modelo "' + m.nombre + '" guardado');
+      if (m.modo === 'campos') abrirEditor(m);
+    }).catch(function (err) { busy(false); toast(err.message || 'No se pudo leer el PDF', true); });
+  });
+  $('#modList').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-act]'); if (!b) return;
+    var m = S.modelos.filter(function (x) { return x.id === b.closest('.mod-item').dataset.id; })[0];
+    if (b.dataset.act === 'campos') abrirEditor(m);
+    else if (b.dataset.act === 'prev') vistaModelo(m);
+    else if (b.dataset.act === 'ren') formDlg('Renombrar modelo', [{ name: 'nombre', label: 'Nombre', value: m.nombre, required: true }]).then(function (v) {
+      if (v) api('guardarModelo', { id: m.id, nombre: v.nombre }).then(function (l) { S.modelos = l; renderModeloSelects(); renderModelos(); }).catch(function (err) { toast(err.message, true); });
+    });
+    else confirmDlg('Eliminar modelo', '¿Eliminar el modelo <b>' + esc(m.nombre) + '</b>? Lo ya emitido con él se volverá a descargar con el diseño del sistema.').then(function (ok) {
+      if (ok) api('eliminarModelo', { id: m.id }).then(function (l) { S.modelos = l; delete FONDOS[m.id]; renderModeloSelects(); renderModelos(); toast('Modelo eliminado'); })
+        .catch(function (err) { toast(err.message, true); });
+    });
+  });
+
+  /* Editor: los datos se arrastran sobre el diseño. x, y = fracción de la hoja (centro vertical del texto). */
+  var ED = null;
+  var LETRAS = [['serif|normal', 'Serif'], ['serif|bold', 'Serif negrita'], ['serif|italic', 'Serif cursiva'], ['script|normal', 'Caligráfica'], ['title|bold', 'Título decorativo']];
+  var FAMILIA = { serif: "'Crimson Text', Georgia, serif", script: "'Great Vibes', cursive", title: "'Cinzel Decorative', Georgia, serif" };
+  function abrirEditor(m) {
+    busy(true, 'Abriendo el diseño…');
+    fondoDe(m.id).then(function (img) {
+      busy(false);
+      ED = { m: m, campos: (m.campos || []).map(completarCampo), sel: null, rec: muestra(m.tipo) };
+      var pg = m.orient === 'portrait' ? [Licencia.PAGINA.H, Licencia.PAGINA.W] : [Licencia.PAGINA.W, Licencia.PAGINA.H];
+      $('#mdPage').style.aspectRatio = pg[0] + ' / ' + pg[1]; ED.pgW = pg[0];
+      $('#mdImg').src = img.data;
+      $('#mdTitulo').textContent = 'Ubicar campos · ' + m.nombre;
+      ED.sel = ED.campos[0] ? ED.campos[0].k : null;
+      $('#modDlg').showModal();
+      requestAnimationFrame(function () { renderEditor(); });
+    }).catch(function (e) { busy(false); toast('No se pudo abrir el modelo: ' + e.message, true); });
+  }
+  function campoSel() { return ED.campos.filter(function (c) { return c.k === ED.sel; })[0]; }
+  function renderEditor(soloPagina) {
+    if (!ED) return;
+    var page = $('#mdPage'), pxMm = page.clientWidth / ED.pgW;
+    $$('.md-f', page).forEach(function (n) { n.remove(); });
+    ED.campos.forEach(function (c) {
+      var d = document.createElement('div');
+      d.className = 'md-f' + (c.k === ED.sel ? ' on' : ''); d.dataset.k = c.k; d.tabIndex = 0;
+      d.textContent = Licencia.valorCampo(ED.rec, c.k) || '[' + c.k + ']';
+      d.style.left = (c.x * 100) + '%'; d.style.top = (c.y * 100) + '%';
+      d.style.transform = 'translate(' + (c.a === 'left' ? '0' : c.a === 'right' ? '-100%' : '-50%') + ',-50%)';
+      d.style.fontFamily = FAMILIA[c.f] || FAMILIA.serif;
+      d.style.fontWeight = c.st === 'bold' || c.f === 'title' ? '700' : '400';
+      d.style.fontStyle = c.st === 'italic' ? 'italic' : 'normal';
+      d.style.fontSize = (c.s * 0.3528 * pxMm) + 'px';
+      d.style.color = c.c; d.style.maxWidth = (c.w * 100) + '%';
+      page.appendChild(d);
+    });
+    if (soloPagina) return;
+    var lista = Licencia.CAMPOS[ED.m.tipo];
+    $('#mdCampos').innerHTML = lista.map(function (x) {
+      var on = ED.campos.some(function (c) { return c.k === x[0]; });
+      return '<label class="check' + (x[0] === ED.sel ? ' sel' : '') + '"><input type="checkbox" data-k="' + x[0] + '"' + (on ? ' checked' : '') + '> ' + esc(x[1]) + '</label>';
+    }).join('');
+    var c = campoSel();
+    $('#mdProps').innerHTML = !c ? '<p class="muted small">Seleccione un dato en el diseño para cambiar su tamaño, letra y color.</p>' :
+      '<h4>' + esc((lista.filter(function (x) { return x[0] === c.k; })[0] || [0, c.k])[1]) + '</h4>' +
+      '<div class="form-grid">' +
+      '<label>Tamaño (pt)<input type="number" data-p="s" min="5" max="72" step="0.5" value="' + c.s + '"></label>' +
+      '<label>Color<input type="color" data-p="c" value="' + esc(c.c) + '"></label>' +
+      '<label class="span2">Letra<select data-p="letra">' + LETRAS.map(function (l) {
+        return '<option value="' + l[0] + '"' + (l[0] === c.f + '|' + (c.f === 'script' ? 'normal' : c.f === 'title' ? 'bold' : c.st) ? ' selected' : '') + '>' + l[1] + '</option>'; }).join('') + '</select></label>' +
+      '<label class="span2">Alineación<select data-p="a"><option value="left"' + (c.a === 'left' ? ' selected' : '') + '>Desde la izquierda</option><option value="center"' + (c.a === 'center' ? ' selected' : '') + '>Centrado</option><option value="right"' + (c.a === 'right' ? ' selected' : '') + '>Hasta la derecha</option></select></label>' +
+      '<label class="span2">Ancho máximo: <b>' + Math.round(c.w * 100) + '%</b> de la hoja <small class="muted">(si el texto es más largo, se achica)</small><input type="range" data-p="w" min="10" max="100" value="' + Math.round(c.w * 100) + '"></label>' +
+      '</div><p class="muted small">Posición: ' + Math.round(c.x * 1000) / 10 + '% · ' + Math.round(c.y * 1000) / 10 + '%</p>';
+  }
+  $('#mdCampos').addEventListener('change', function (e) {
+    var k = e.target.dataset.k; if (!k) return;
+    if (e.target.checked) { ED.campos.push(campoNuevo(k, ED.campos.length)); ED.sel = k; }
+    else { ED.campos = ED.campos.filter(function (c) { return c.k !== k; }); if (ED.sel === k) ED.sel = ED.campos[0] ? ED.campos[0].k : null; }
+    renderEditor();
+  });
+  $('#mdProps').addEventListener('input', function (e) {
+    var c = campoSel(), p = e.target.dataset.p; if (!c || !p) return;
+    if (p === 's') c.s = Math.max(5, Math.min(72, Number(e.target.value) || c.s));
+    else if (p === 'w') c.w = Number(e.target.value) / 100;
+    else if (p === 'letra') { var v = e.target.value.split('|'); c.f = v[0]; c.st = v[1]; }
+    else c[p] = e.target.value;
+    renderEditor(true);
+    if (p === 'w') { var lb = e.target.closest('label').querySelector('b'); if (lb) lb.textContent = Math.round(c.w * 100) + '%'; }
+  });
+  // Arrastrar los datos sobre el diseño
+  (function () {
+    var drag = null;
+    $('#mdPage').addEventListener('pointerdown', function (e) {
+      var d = e.target.closest('.md-f'); if (!d) return;
+      e.preventDefault();
+      ED.sel = d.dataset.k; var c = campoSel(), r = $('#mdPage').getBoundingClientRect();
+      drag = { c: c, r: r, dx: e.clientX - (r.left + c.x * r.width), dy: e.clientY - (r.top + c.y * r.height) };
+      d.setPointerCapture(e.pointerId);
+      $$('.md-f').forEach(function (n) { n.classList.toggle('on', n === d); });
+    });
+    $('#mdPage').addEventListener('pointermove', function (e) {
+      if (!drag) return;
+      drag.c.x = Math.max(0, Math.min(1, (e.clientX - drag.dx - drag.r.left) / drag.r.width));
+      drag.c.y = Math.max(0, Math.min(1, (e.clientY - drag.dy - drag.r.top) / drag.r.height));
+      var n = $('.md-f[data-k="' + drag.c.k + '"]'); if (n) { n.style.left = (drag.c.x * 100) + '%'; n.style.top = (drag.c.y * 100) + '%'; }
+    });
+    var fin = function () { if (drag) { drag = null; renderEditor(); var n = $('.md-f[data-k="' + ED.sel + '"]'); if (n) n.focus(); } };
+    $('#mdPage').addEventListener('pointerup', fin); $('#mdPage').addEventListener('pointercancel', fin);
+    $('#mdPage').addEventListener('keydown', function (e) {
+      var c = ED && campoSel(); if (!c || !/^Arrow/.test(e.key)) return;
+      e.preventDefault(); var st = e.shiftKey ? 0.01 : 0.002;
+      if (e.key === 'ArrowLeft') c.x = Math.max(0, c.x - st); if (e.key === 'ArrowRight') c.x = Math.min(1, c.x + st);
+      if (e.key === 'ArrowUp') c.y = Math.max(0, c.y - st); if (e.key === 'ArrowDown') c.y = Math.min(1, c.y + st);
+      renderEditor(); var n = $('.md-f[data-k="' + c.k + '"]'); if (n) n.focus();
+    });
+  })();
+  window.addEventListener('resize', function () { if ($('#modDlg').open) renderEditor(); });
+  $('#mdCancel').addEventListener('click', function () { $('#modDlg').close(); ED = null; });
+  $('#mdPrev').addEventListener('click', function () { if (ED) vistaModelo(ED.m, ED.campos); });
+  $('#mdSave').addEventListener('click', function () {
+    if (!ED) return;
+    if (!ED.campos.some(function (c) { return c.k === 'nombre'; }) && !window.confirm('El modelo no tiene el nombre del estudiante. ¿Guardar de todas formas?')) return;
+    busy(true, 'Guardando…');
+    api('guardarModelo', { id: ED.m.id, campos: ED.campos }).then(function (l) {
+      S.modelos = l; renderModeloSelects(); renderModelos(); $('#modDlg').close(); ED = null; toast('Ubicación de los campos guardada');
+    }).catch(function (e) { toast(e.message, true); }).then(function () { busy(false); });
+  });
+
   /* ---------------- generación de PDF ---------------- */
   function recordFor(s, c) {
     c = c || S.config;
     return { nivel: S.nivel, anio: S.anio, registro: s.registro, nombre: s.nombre, run: runFormat(s.run), sexo: s.sexo,
       colegio: c.colegio, rbd: c.rbd, region: c.region, provincia: c.provincia, comuna: c.comuna, anioEscolar: S.anio,
-      directora: c.directora, cargo: c.cargo, ciudad: c.ciudad, fecha: c.fecha };
+      directora: c.directora, cargo: c.cargo, ciudad: c.ciudad, fecha: c.fecha, modeloId: modeloElegido('licencia') };
   }
-  function openPdf(records, c) {
-    var w = window.open('', '_blank');
-    Licencia.prepareAssets(c || S.config).then(function (assets) {
-      var url = Licencia.build(records, assets, printOpts(c)).output('bloburl');
-      if (w) w.location.href = url; else window.location.href = url;
-    });
-  }
+  function openPdf(records, c) { abrirDoc(pdfLic(records, c)); }
   function filename(records) {
     var r = records[0], niv = r.nivel === '8B' ? '8Basico' : '4Medio';
     return records.length === 1 ? 'Licencia_' + niv + '_Reg' + r.registro + '_' + slug(r.nombre) + '.pdf'
       : 'Licencias_' + niv + '_' + r.anio + '_' + records.length + '.pdf';
   }
   function savePdf(records) {
-    Licencia.build(records, S.assets, printOpts()).save(filename(records));
+    return pdfLic(records).then(function (doc) { doc.save(filename(records)); }).catch(function (e) { toast(e.message, true); });
   }
 
   $('#btnPreview').addEventListener('click', function () {
@@ -1149,10 +1437,10 @@
     var sin = studs.filter(function (s) { return !s.registro; });
     if (sin.length) return toast('Falta N° de registro para ' + sin.length + ' estudiante(s)', true);
     busy(true, 'Guardando y generando ' + ids.length + ' licencia(s)…');
-    api('emitir', { ids: ids }).then(function (recs) {
+    api('emitir', { ids: ids, modeloId: modeloElegido('licencia') }).then(function (recs) {
       recs.forEach(function (r) { r.run = runFormat(r.run); });
       recs.sort(function (a, b) { return (Number(a.registro) || 0) - (Number(b.registro) || 0); });
-      savePdf(recs);
+      busy(false); savePdf(recs);
       toast(recs.length + ' licencia(s) guardadas en el archivo de ' + Licencia.NIVELES[S.nivel].curso);
       return loadStudents();
     }).catch(function (e) { toast(e.message, true); }).then(function () { busy(false); });
@@ -1278,30 +1566,48 @@
     return Object.keys(c).sort(porCurso).map(function (k) { return [k, c[k]]; });
   }
 
+  function esAdmin() { return !!(S.user && S.user.rol === 'admin'); }
+  /* Paso 3: primero se elige el curso (botones ordenados de Pre-Kínder a 4° Medio) y luego aparece su lista,
+     en el mismo orden en que se cargó. El buscador busca en todos los cursos. */
+  var NIVELES_ESC = [['Educación Parvularia', 0, 1], ['Educación Básica', 2, 9], ['Enseñanza Media', 10, 13], ['Otros', 14, 999]];
   function renderAlumnos() {
-    var cursos = cursosDe(S.alumnos);
+    var cursos = cursosDe(S.alumnos), admin = esAdmin(), q = $('#dipSearch').value.trim();
     if (S.dipCurso && !cursos.some(function (c) { return c[0] === S.dipCurso; })) S.dipCurso = '';
-    $('#dipCurso').innerHTML = '<option value="">Todos los cursos (' + S.alumnos.length + ')</option>' + cursos.map(function (c) {
-      return '<option value="' + esc(c[0]) + '"' + (c[0] === S.dipCurso ? ' selected' : '') + '>' + esc(c[0]) + ' (' + c[1] + ')</option>';
+    var selPorCurso = {};
+    S.alumnos.forEach(function (a) { if (S.dipSel[a.id]) selPorCurso[a.curso] = (selPorCurso[a.curso] || 0) + 1; });
+    var verCursos = !S.dipCurso && !q;
+    $('#dipCursos').classList.toggle('hidden', !verCursos);
+    $('#dipCursos').innerHTML = !cursos.length ? '' : NIVELES_ESC.map(function (n) {
+      var cs = cursos.filter(function (c) { var r = rangoCurso(c[0]); return r >= n[1] && r <= n[2]; });
+      if (!cs.length) return '';
+      return '<div class="cp-grupo"><small>' + n[0] + '</small><div class="cp-botones">' + cs.map(function (c) {
+        return '<button type="button" class="cp-btn" data-curso="' + esc(c[0]) + '"><b>' + esc(c[0]) + '</b><span>' + c[1] + ' alumnos</span>' +
+          (selPorCurso[c[0]] ? '<em>' + selPorCurso[c[0]] + ' ✓</em>' : '') + '</button>';
+      }).join('') + '</div></div>';
     }).join('');
-    $('#btnDelCurso').classList.toggle('hidden', !S.dipCurso);
+    $('#dipCursoHead').classList.toggle('hidden', !S.dipCurso || !!q);
+    $('#dipCursoTitulo').textContent = S.dipCurso ? S.dipCurso + ' · ' + S.alumnos.filter(function (a) { return a.curso === S.dipCurso; }).length + ' alumnos' : '';
     var list = alumnosFiltrados();
-    $('#alumTable tbody').innerHTML = list.map(function (a) {
+    $('#alumWrap').classList.toggle('hidden', verCursos && cursos.length > 0);
+    $('#alumTable tbody').innerHTML = list.map(function (a, i) {
       return '<tr data-id="' + esc(a.id) + '" class="' + (S.dipSel[a.id] ? 'row-sel' : '') + '"><td><input type="checkbox" class="dsel"' + (S.dipSel[a.id] ? ' checked' : '') + '></td>' +
-        '<td class="name">' + esc(a.nombre) + penBtn() + '</td><td><span class="chip curso">' + esc(a.curso) + '</span></td><td>' + esc(runFormat(a.run)) + (runEsIPE(a.run) ? runChip(a.run) : '') + '</td>' +
+        '<td class="muted">' + (i + 1) + '</td>' +
+        '<td class="name">' + esc(a.nombre) + (admin ? penBtn() : '') + '</td><td><span class="chip curso">' + esc(a.curso) + '</span></td><td>' + esc(runFormat(a.run)) + (runEsIPE(a.run) ? runChip(a.run) : '') + '</td>' +
         '<td>' + (a.diplomas ? '<span class="chip ok">' + a.diplomas + ' diploma' + (a.diplomas > 1 ? 's' : '') + '</span>' : '<span class="muted">—</span>') + '</td>' +
-        '<td class="actions"><button class="link" data-act="edit">Editar</button><button class="link danger" data-act="del">Eliminar</button></td></tr>';
+        (admin ? '<td class="actions"><button class="link" data-act="edit">Editar</button><button class="link danger" data-act="del">Eliminar</button></td>' : '') + '</tr>';
     }).join('');
-    $('#alumEmpty').classList.toggle('hidden', list.length > 0);
-    $('#alumEmpty').textContent = S.alumnos.length ? 'No hay alumnos con este filtro.' : 'Aún no hay alumnos cargados para ' + S.anio + '. Cargue la lista de todos los cursos.';
+    $('#alumEmpty').classList.toggle('hidden', list.length > 0 || (verCursos && cursos.length > 0));
+    $('#alumEmpty').textContent = S.alumnos.length ? 'No hay alumnos con esa búsqueda.'
+      : 'Aún no hay alumnos cargados para ' + S.anio + '.' + (admin ? ' Cargue la lista de todos los cursos.' : ' Un administrador debe cargar la lista.');
     $('#alumCount').textContent = S.alumnos.length ? '· ' + S.alumnos.length + ' alumnos en ' + cursos.length + ' cursos' : '';
     $('#dipStats').innerHTML = $('#dipStats2').innerHTML = '<span><b>' + S.alumnos.length + '</b> alumnos</span><span><b>' + cursos.length + '</b> cursos</span><span><b>' + S.diplomas.length + '</b> diplomas</span>';
     updDipSel();
   }
   function alumnosFiltrados() {
     var q = norm($('#dipSearch').value);
+    if (!q && !S.dipCurso) return [];
     return S.alumnos.filter(function (a) {
-      return (!S.dipCurso || a.curso === S.dipCurso) && (!q || norm(a.nombre + a.run + a.curso).indexOf(q) >= 0);
+      return q ? norm(a.nombre + a.run + a.curso).indexOf(q) >= 0 : a.curso === S.dipCurso;
     });
   }
   function updDipSel() {
@@ -1310,7 +1616,12 @@
     $('#dipActionbar').classList.toggle('hidden', !(n > 0 && S.view === 'diplomas'));
     $('#dipChkAll').checked = vis.length > 0 && vis.every(function (a) { return S.dipSel[a.id]; });
   }
-  $('#dipCurso').addEventListener('change', function () { S.dipCurso = this.value; renderAlumnos(); });
+  $('#dipCursos').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-curso]'); if (!b) return;
+    S.dipCurso = b.dataset.curso; renderAlumnos();
+    $('#dipCursoHead').scrollIntoView({ block: 'nearest' });
+  });
+  $('#btnVolverCursos').addEventListener('click', function () { S.dipCurso = ''; renderAlumnos(); });
   $('#dipSearch').addEventListener('input', renderAlumnos);
   $('#dipChkAll').addEventListener('change', function () {
     var on = this.checked;
@@ -1440,27 +1751,69 @@
   function dipRecord(a, motivo, fecha) {
     var c = S.config;
     return { tipo: 'diploma', nombre: a.nombre, curso: a.curso, motivo: motivo, fecha: fecha, colegio: c.colegio || window.COLEGIO_NOMBRE || '',
-      directora: c.directora, cargo: c.cargo, ciudad: c.ciudad };
+      directora: c.directora, cargo: c.cargo, ciudad: c.ciudad, modeloId: modeloElegido('diploma'), firmas: S.firmas };
   }
+
+  /* ---- Firmas adicionales de los diplomas (cualquier usuario). La directora firma siempre. ---- */
+  S.firmas = (function () { try { return JSON.parse(lsGet('lic_firmas') || '[]').filter(function (f) { return f && f.nombre; }); } catch (e) { return []; } })();
+  function renderFirmasRes() {
+    var n = S.firmas.length;
+    $('#firmasRes').innerHTML = n ? 'Firman: la directora y <b>' + n + ' persona' + (n > 1 ? 's' : '') + ' más</b> (' + esc(S.firmas.map(function (f) { return f.nombre; }).join(', ')) + ')'
+      : 'Firma: solo la directora';
+  }
+  renderFirmasRes();
+  function filaFirmaHtml(f) {
+    return '<div class="firma-row"><input data-f="nombre" placeholder="Nombre completo" value="' + esc(f.nombre || '') + '">' +
+      '<input data-f="cargo" placeholder="Cargo (ej.: Profesor(a) Jefe)" value="' + esc(f.cargo || '') + '">' +
+      '<button type="button" class="link danger" data-quitar title="Quitar esta firma">✕</button></div>';
+  }
+  // Pregunta quiénes firman además de la directora. okLabel: texto del botón (p. ej. "Generar diplomas").
+  function editarFirmas(okLabel) {
+    var c = S.config, ok = $('#dlgOk'), prevTxt = ok.textContent;
+    ok.textContent = okLabel || 'Guardar';
+    var html = '<p>¿Se requiere que <b>firmen más personas</b> además de la directora? Agregue todas las que necesite; si no, continúe.</p>' +
+      '<div class="firma-fija"><b>' + esc(c.directora || 'Directora') + '</b><small>' + esc(c.cargo || 'Director(a) del Establecimiento') + ' · firma siempre</small></div>' +
+      '<div id="firmasDlg" class="firmas-dlg">' + S.firmas.map(filaFirmaHtml).join('') + '</div>' +
+      '<button type="button" class="btn ghost sm mt-s" id="btnAddFirma">+ Agregar firma</button>';
+    var p = openDlg('Firmas del diploma', html);
+    var cont = $('#firmasDlg');
+    $('#dlgBody').onclick = function (e) {
+      if (e.target.id === 'btnAddFirma') { cont.insertAdjacentHTML('beforeend', filaFirmaHtml({})); cont.lastElementChild.querySelector('input').focus(); }
+      if (e.target.hasAttribute('data-quitar')) e.target.closest('.firma-row').remove();
+    };
+    return p.then(function (aceptado) {
+      ok.textContent = prevTxt;
+      if (!aceptado) return false;
+      S.firmas = $$('.firma-row', cont).map(function (r) {
+        return { nombre: r.querySelector('[data-f="nombre"]').value.replace(/\s+/g, ' ').trim(), cargo: r.querySelector('[data-f="cargo"]').value.replace(/\s+/g, ' ').trim() };
+      }).filter(function (f) { return f.nombre; });
+      lsSet('lic_firmas', JSON.stringify(S.firmas)); renderFirmasRes();
+      return true;
+    });
+  }
+  $('#btnFirmas').addEventListener('click', function () { editarFirmas('Guardar firmas'); });
   $('#btnDipPreview').addEventListener('click', function () {
     var a = S.alumnos.filter(function (x) { return S.dipSel[x.id]; })[0] || S.alumnos[0] || { nombre: 'Nombre Apellido Apellido', curso: '3° Básico A' };
-    var w = window.open('', '_blank');
-    var url = Licencia.buildDiplomas([dipRecord(a, motivoActual() || 'Su destacada participación', $('#dipFecha').value || hoyISO())], S.assets, printOpts()).output('bloburl');
-    if (w) w.location.href = url; else window.location.href = url;
+    abrirDoc(pdfDip([dipRecord(a, motivoActual() || 'Su destacada participación', $('#dipFecha').value || hoyISO())]));
   });
   $('#btnDipEmitir').addEventListener('click', function () {
     var ids = Object.keys(S.dipSel), motivo = motivoActual(), fecha = $('#dipFecha').value;
     if (!ids.length) return toast('Seleccione al menos un alumno', true);
     if (!motivo) return toast('Escriba el motivo del diploma', true);
     if (!fecha) return toast('Indique la fecha del diploma', true);
+    // antes de generar: ¿firman más personas?
+    editarFirmas('Generar ' + ids.length + ' diploma' + (ids.length > 1 ? 's' : '')).then(function (seguir) {
+    if (!seguir) return;
     busy(true, 'Generando ' + ids.length + ' diploma(s)…');
-    api('emitirDiplomas', { anio: S.anio, ids: ids, motivo: motivo, fecha: fecha }).then(function (recs) {
+    api('emitirDiplomas', { anio: S.anio, ids: ids, motivo: motivo, fecha: fecha, modeloId: modeloElegido('diploma'), firmas: S.firmas }).then(function (recs) {
       recs.sort(function (a, b) { return porCurso(a.curso, b.curso) || a.nombre.localeCompare(b.nombre); });
-      Licencia.buildDiplomas(recs, S.assets, printOpts()).save('Diplomas_' + slug(motivo).slice(0, 40) + '_' + fecha + '.pdf');
+      busy(false);
+      pdfDip(recs).then(function (doc) { doc.save('Diplomas_' + slug(motivo).slice(0, 40) + '_' + fecha + '.pdf'); });
       toast(recs.length + ' diploma(s) generados y guardados');
       S.dipSel = {};
       return loadDiplomas();
     }).catch(function (e) { toast(e.message, true); }).then(function () { busy(false); });
+    });
   });
 
   // --- archivo de diplomas ---
@@ -1476,10 +1829,12 @@
     $('#dipArchMotivo').innerHTML = '<option value="">Todos los motivos</option>' + Object.keys(motivos).sort().map(function (m) {
       return '<option value="' + esc(m) + '"' + (m === mSel ? ' selected' : '') + '>' + esc(m) + ' (' + motivos[m] + ')</option>'; }).join('');
     var list = diplomasFiltrados();
+    // Todos ven y descargan todos los diplomas; corregir o eliminar: el administrador, o quien lo emitió
     $('#dipTable tbody').innerHTML = list.map(function (d) {
-      return '<tr data-id="' + esc(d.id) + '"><td>' + esc(Licencia.fechaLarga(d.fecha)) + '</td><td class="name">' + esc(d.nombre) + penBtn() + '</td><td><span class="chip curso">' + esc(d.curso) +
-        '</span></td><td>' + esc(d.motivo) + '</td><td>' + esc(d.emitidoPor) + '<br><small class="muted">' + esc(fmtDate(d.emitido)) + '</small></td>' +
-        '<td class="actions"><button class="link" data-act="dl">Descargar PDF</button>' + (S.user.rol === 'admin' ? '<button class="link danger" data-act="del">Quitar</button>' : '') + '</td></tr>';
+      var puede = esAdmin() || esPropio(d);
+      return '<tr data-id="' + esc(d.id) + '"><td>' + esc(Licencia.fechaLarga(d.fecha)) + '</td><td class="name">' + esc(d.nombre) + (puede ? penBtn() : '') + '</td><td><span class="chip curso">' + esc(d.curso) +
+        '</span></td><td>' + esc(d.motivo) + '</td><td>' + esc(d.emitidoPor) + (esPropio(d) ? ' <span class="chip pend">usted</span>' : '') + '<br><small class="muted">' + esc(fmtDate(d.emitido)) + '</small></td>' +
+        '<td class="actions"><button class="link" data-act="dl">Descargar PDF</button>' + (puede ? '<button class="link danger" data-act="del">Eliminar</button>' : '') + '</td></tr>';
     }).join('');
     $('#dipEmpty').classList.toggle('hidden', list.length > 0);
     $('#dipCount').textContent = S.diplomas.length ? '· ' + S.diplomas.length + ' en ' + S.anio : '';
@@ -1487,23 +1842,24 @@
   }
   $('#dipArchCurso').addEventListener('change', renderDiplomas);
   $('#dipArchMotivo').addEventListener('change', renderDiplomas);
+  function esPropio(d) { return d.emitidoPorId ? d.emitidoPorId === S.user.id : d.emitidoPor === S.user.nombre; }
   function dipDatos(d) { return Object.assign({ nombre: d.nombre, curso: d.curso, motivo: d.motivo, fecha: d.fecha }, d.datos || {}); }
   $('#dipTable tbody').addEventListener('click', function (e) {
     var b = e.target.closest('button[data-act]'); if (!b) return;
     var d = S.diplomas.filter(function (x) { return x.id === b.closest('tr').dataset.id; })[0];
-    if (b.dataset.act === 'nom') renombrar('diploma', d, 'alumnos', loadDiplomas, function () {
+    if (b.dataset.act === 'nom') renombrar('diploma', d, esAdmin() ? 'alumnos' : '', loadDiplomas, function () {
       return confirmDlg('Nombre corregido', '¿Descargar ahora el diploma de <b>' + esc(d.nombre) + '</b> con el nombre corregido?').then(function (ok) {
-        if (ok) Licencia.buildDiplomas([dipDatos(d)], S.assets, printOpts()).save('Diploma_' + slug(d.nombre) + '.pdf');
+        if (ok) pdfDip([dipDatos(d)]).then(function (doc) { doc.save('Diploma_' + slug(d.nombre) + '.pdf'); });
       });
     });
-    else if (b.dataset.act === 'dl') Licencia.buildDiplomas([dipDatos(d)], S.assets, printOpts()).save('Diploma_' + slug(d.nombre) + '.pdf');
-    else confirmDlg('Quitar diploma', '¿Quitar el diploma de <b>' + esc(d.nombre) + '</b> (' + esc(d.motivo) + ') del archivo?').then(function (ok) {
+    else if (b.dataset.act === 'dl') pdfDip([dipDatos(d)]).then(function (doc) { doc.save('Diploma_' + slug(d.nombre) + '.pdf'); });
+    else confirmDlg('Eliminar diploma', '¿Eliminar el diploma de <b>' + esc(d.nombre) + '</b> (' + esc(d.motivo) + ') del archivo?').then(function (ok) {
       if (ok) api('deleteDiploma', { id: d.id }).then(loadDiplomas).catch(function (err) { toast(err.message, true); });
     });
   });
   $('#btnDipAll').addEventListener('click', function () {
     var l = diplomasFiltrados(); if (!l.length) return;
-    Licencia.buildDiplomas(l.map(dipDatos), S.assets, printOpts()).save('Diplomas_' + S.anio + '_' + l.length + '.pdf');
+    pdfDip(l.map(dipDatos)).then(function (doc) { doc.save('Diplomas_' + S.anio + '_' + l.length + '.pdf'); });
   });
 
   /* ---------------- usuarios ---------------- */
@@ -1520,7 +1876,7 @@
           : u.conClave === false ? (u.ultimoIngreso ? '<span class="chip ok" title="Último ingreso">Ingresó ' + esc(fmtDate(u.ultimoIngreso).split(' ')[0]) + '</span>' : '<span class="chip warn">Autorizado · aún no ingresa</span>')
           : u.cambiarClave ? '<span class="chip warn" title="Aún no crea su clave personal">Invitación pendiente</span>' : '<span class="chip ok">Activo</span>') +
         '</td><td class="actions"><button class="link" data-act="edit">Editar</button>' +
-        (me ? '' : (u.conClave === false ? '' : '<button class="link" data-act="inv" title="Genera una nueva clave provisoria y la envía a su correo">Enviar clave provisoria</button>') +
+        (me ? '' : (u.conClave === false ? '<button class="link" data-act="bienv" title="Reenvía el correo de bienvenida con las instrucciones de ingreso">Enviar bienvenida</button>' : '<button class="link" data-act="inv" title="Genera una nueva clave provisoria y la envía a su correo">Enviar clave provisoria</button>') +
           '<button class="link" data-act="toggle">' + (u.activo ? 'Desactivar' : 'Activar') + '</button><button class="link danger" data-act="del">Eliminar</button>') + '</td></tr>';
     }).join('');
   }
@@ -1555,10 +1911,23 @@
     f.addEventListener('reset', function () { tocado = false; });
   }
 
+  /* Correo de bienvenida (paso aparte: si el correo falla, la autorización ya quedó hecha) */
+  function bienvenida(ids) {
+    if (!ids || !ids.length) return Promise.resolve();
+    busy(true, 'Enviando correo de bienvenida…');
+    return api('enviarBienvenida', { ids: ids, pageUrl: paginaUrl() }).then(function (r) {
+      busy(false);
+      if (r.demo) toast('Modo demostración: no se envían correos');
+      else if (r.fallidos.length) toast('No se pudo enviar la bienvenida a: ' + r.fallidos.join(', '), true);
+      else toast('✉ Correo de bienvenida enviado a ' + r.enviados.length + ' funcionario' + (r.enviados.length === 1 ? '' : 's'));
+    }).catch(function (e) { busy(false); toast('Quedaron autorizados, pero ' + e.message, true); });
+  }
   function autorizar(personas, rol) {
     busy(true, 'Autorizando…');
+    var conBienvenida = $('#autForm').elements.bienvenida.checked;
     return api('autorizarCorreos', { personas: personas, rol: rol }).then(function (r) {
       renderUsers(r.lista); busy(false);
+      if (conBienvenida) bienvenida(r.nuevosIds);
       var una = personas.length === 1 && r.agregados === 1;
       if (una) toast('✓ ' + personas[0].nombre + ' autorizado(a): ' + personas[0].email);
       else openDlg('Funcionarios autorizados', '<p class="inv-ok">✓ ' + r.agregados + ' funcionario' + (r.agregados === 1 ? '' : 's') + ' autorizado' + (r.agregados === 1 ? '' : 's') + '.</p>' +
@@ -1639,6 +2008,7 @@
     var b = e.target.closest('button[data-act]'); if (!b) return;
     var u = S.users.filter(function (x) { return x.id === b.closest('tr').dataset.id; })[0];
     var p;
+    if (b.dataset.act === 'bienv') return bienvenida([u.id]);
     if (b.dataset.act === 'inv') {
       return confirmDlg('Enviar clave provisoria', 'Se generará una <b>nueva clave provisoria</b> para <b>' + esc(u.nombre) + '</b> y se enviará a <b>' + esc(u.email || '(sin correo)') +
         '</b>. Su clave actual dejará de funcionar.').then(function (ok) {

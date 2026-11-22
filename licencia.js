@@ -439,18 +439,78 @@
     tracked(doc, String(r.cargo || 'Director(a) del Establecimiento').toUpperCase(), scx, fyL + 8.6, 0.45);
   }
 
-  /* ======================= API pública ======================= */
-  function build(records, assets, opts) {
+  /* ======================= Modelos cargados por el administrador =======================
+     modelo = { modo: 'fondo' | 'campos', orient: 'landscape' | 'portrait', logos: bool,
+                campos: [{ k, x, y, s, f, st, c, a, w }], fondo: { data (JPEG), w, h, alias } }
+       - 'fondo':  el PDF es el marco/fondo; encima va todo el texto del diseño del sistema (sin su marco).
+       - 'campos': el PDF ya trae los textos fijos; solo se escriben los datos en las posiciones guardadas
+                   (x, y = fracción del ancho/alto de la hoja, medidas al centro vertical del texto). */
+  var CAMPOS = {
+    licencia: [['nombre', 'Nombre del estudiante'], ['trato', 'Don / Doña'], ['run', 'R.U.N.'], ['registro', 'N° de registro'],
+      ['anio', 'Año'], ['otorga', 'Tipo de licencia'], ['colegio', 'Establecimiento'], ['rbd', 'RBD'], ['region', 'Región'],
+      ['provincia', 'Provincia'], ['comuna', 'Comuna'], ['anioEscolar', 'Año escolar'], ['lugarFecha', 'Lugar y fecha'],
+      ['fecha', 'Fecha'], ['directora', 'Nombre de la directora'], ['cargo', 'Cargo de la directora']],
+    diploma: [['nombre', 'Nombre del alumno'], ['curso', 'Curso'], ['motivo', 'Motivo'], ['lugarFecha', 'Lugar y fecha'],
+      ['fecha', 'Fecha'], ['colegio', 'Colegio'], ['directora', 'Nombre de la directora'], ['cargo', 'Cargo de la directora'],
+      ['firmas', 'Firmas adicionales (en fila)']]
+  };
+  function valorCampo(r, k) {
+    var nv = NIVELES[r.nivel] || NIVELES['4M'];
+    switch (k) {
+      case 'trato': return r.sexo === 'F' ? 'Doña' : r.sexo === 'M' ? 'Don' : 'Don(a)';
+      case 'otorga': return nv.otorga;
+      case 'lugarFecha': return (r.ciudad ? r.ciudad + ', ' : '') + fechaLarga(r.fecha);
+      case 'fecha': return fechaLarga(r.fecha);
+      case 'cargo': return r.cargo || 'Director(a) del Establecimiento';
+      case 'firmas': return firmasDe(r).map(function (f) { return f.nombre; }).join('   ·   ');
+      default: return r[k] == null ? '' : String(r[k]);
+    }
+  }
+  function pagina(m) { return m && m.orient === 'portrait' ? { o: 'portrait', w: H, h: W } : { o: 'landscape', w: W, h: H }; }
+  function hexRgb(h) {
+    var m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(h || ''));
+    return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : C.navy;
+  }
+  function drawModelo(doc, r, assets, opts, m, estandar) {
+    var pg = pagina(m);
+    if (m.fondo) doc.addImage(m.fondo.data, 'JPEG', 0, 0, pg.w, pg.h, m.fondo.alias, 'FAST');
+    if (m.modo === 'fondo') {
+      // diseño del sistema sobre el fondo: sin su marco ni marca de agua; logos solo si el administrador lo pidió
+      var a = m.logos ? { colegio: assets.colegio, ministerio: assets.ministerio } : {};
+      return estandar(doc, r, a, Object.assign({}, opts, { borde: false }));
+    }
+    (m.campos || []).forEach(function (c) {
+      if (c.k === 'firmas') { // fila de firmas adicionales (línea, nombre y cargo de cada una)
+        return filaFirmas(doc, firmasDe(r), c.x * pg.w, c.y * pg.h, (Number(c.w) || 0.8) * pg.w, { size: Number(c.s) || 12, color: hexRgb(c.c), f: c.f, st: c.st });
+      }
+      var t = valorCampo(r, c.k); if (!t) return;
+      var size = Number(c.s) || 14;
+      setF(doc, c.f || 'serif', c.st || 'normal', size, hexRgb(c.c));
+      fit(doc, t, (Number(c.w) || 0.8) * pg.w, size, 6);
+      doc.text(t, c.x * pg.w, c.y * pg.h, { align: c.a || 'center', baseline: 'middle' });
+    });
+  }
+  // Construye el PDF con el diseño del sistema o con un modelo: opts.modelos[r.modeloId] (el que usó cada
+  // documento) o, si no, opts.modelo. Si el modelo ya no existe, se usa el diseño del sistema.
+  function construir(records, assets, opts, estandar, titulo) {
+    opts = opts || {};
     var jsPDF = global.jspdf.jsPDF;
-    var doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'letter', compress: true });
+    var modeloDe = function (r) { return (r.modeloId && opts.modelos && opts.modelos[r.modeloId]) || opts.modelo || null; };
+    var doc = new jsPDF({ orientation: pagina(modeloDe(records[0] || {})).o, unit: 'mm', format: 'letter', compress: true });
     registerFonts(doc);
     records.forEach(function (r, i) {
-      if (i > 0) doc.addPage('letter', 'landscape');
-      conAjuste(doc, opts, function () { drawLicense(doc, r, assets || {}, opts); });
+      var m = modeloDe(r);
+      if (i > 0) doc.addPage('letter', pagina(m).o);
+      conAjuste(doc, opts, function () {
+        if (m) drawModelo(doc, r, assets || {}, opts, m, estandar); else estandar(doc, r, assets || {}, opts);
+      });
     });
-    finalizar(doc, 'Licencias');
+    finalizar(doc, titulo);
     return doc;
   }
+
+  /* ======================= API pública ======================= */
+  function build(records, assets, opts) { return construir(records, assets, opts, drawLicense, 'Licencias'); }
 
   /* Indica al visor que imprima a tamaño real (sin "Ajustar a la página"),
      que es la causa más común de que la licencia salga corrida o torcida. */
@@ -468,6 +528,30 @@
     doc.internal.write('q 1 0 0 1 ' + (ax * k).toFixed(2) + ' ' + (-ay * k).toFixed(2) + ' cm');
     fn();
     doc.internal.write('Q');
+  }
+
+  /* Firmas adicionales del diploma: [{ nombre, cargo }] (además de la directora) */
+  function firmasDe(r) {
+    return (r.firmas || []).filter(function (f) { return f && String(f.nombre || '').trim(); }).slice(0, 8);
+  }
+  /* Fila de firmas centrada en cx: línea, nombre y cargo. Con muchas firmas se achican para que quepan.
+     estilo (opcional, desde un modelo): { size, color, f, st } */
+  function filaFirmas(doc, firmas, cx, y, ancho, estilo) {
+    var n = firmas.length; if (!n) return;
+    var slot = ancho / n, lw = Math.min(84, slot - 8);
+    var sz = estilo && estilo.size ? estilo.size : n > 4 ? 10 : n > 3 ? 11 : 12.5;
+    var col = estilo && estilo.color ? estilo.color : C.navy;
+    firmas.forEach(function (f, i) {
+      var x = cx - ancho / 2 + slot * (i + 0.5);
+      doc.setDrawColor.apply(doc, col); doc.setLineWidth(0.35);
+      doc.line(x - lw / 2, y, x + lw / 2, y);
+      setF(doc, estilo && estilo.f || 'serif', estilo && estilo.st || 'bold', sz, col);
+      var nom = String(f.nombre || ''); fit(doc, nom, lw, sz, 7);
+      doc.text(nom, x, y + 4.8, { align: 'center' });
+      setF(doc, 'serif', 'bold', 7.5, C.gray);
+      var cg = String(f.cargo || '').toUpperCase(); fit(doc, cg, lw, 7.5, 5.5);
+      tracked(doc, cg, x, y + 8.6, cg.length > 30 ? 0.15 : 0.4);
+    });
   }
 
   /* ======================= Diploma de Reconocimiento ======================= */
@@ -504,6 +588,15 @@
     while (lines.length > 2 && ms > 11) { ms -= 0.5; doc.setFontSize(ms); lines = doc.splitTextToSize(mot, 200); }
     lines.slice(0, 2).forEach(function (l, i) { doc.text(l, CX, 155 + i * (ms * 0.45), { align: 'center' }); });
 
+    // pie con firmas adicionales: lugar y fecha arriba, centrado; firmas en una fila (directora + las agregadas)
+    var extra = firmasDe(r);
+    if (extra.length) {
+      setF(doc, 'serif', 'italic', 12.5, C.navy);
+      var lug = (r.ciudad ? r.ciudad + ', ' : '') + fechaLarga(r.fecha);
+      fit(doc, lug, 200, 12.5, 9); doc.text(lug, CX, 168, { align: 'center' });
+      filaFirmas(doc, [{ nombre: r.directora, cargo: r.cargo || 'Director(a) del Establecimiento' }].concat(extra), CX, 186, 232, null);
+      return;
+    }
     // pie: lugar y fecha / firma de la directora
     var fyL = 182, lcx = 80, scx = 199;
     setF(doc, 'serif', 'italic', 13, C.navy);
@@ -522,17 +615,7 @@
     tracked(doc, String(r.cargo || 'Director(a) del Establecimiento').toUpperCase(), scx, fyL + 8.6, 0.45);
   }
 
-  function buildDiplomas(records, assets, opts) {
-    var jsPDF = global.jspdf.jsPDF;
-    var doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'letter', compress: true });
-    registerFonts(doc);
-    records.forEach(function (r, i) {
-      if (i > 0) doc.addPage('letter', 'landscape');
-      conAjuste(doc, opts, function () { drawDiploma(doc, r, assets || {}, opts); });
-    });
-    finalizar(doc, 'Diplomas de Reconocimiento');
-    return doc;
-  }
+  function buildDiplomas(records, assets, opts) { return construir(records, assets, opts, drawDiploma, 'Diplomas de Reconocimiento'); }
 
   /* ======================= Lista de cotejo ======================= */
   // Colores por curso (mismos de la página): 4° Medio azul, 8° Básico verde
@@ -693,6 +776,9 @@
     build: build,
     pruebaAlineacion: pruebaAlineacion,
     listaCotejo: listaCotejo,
-    buildDiplomas: buildDiplomas
+    buildDiplomas: buildDiplomas,
+    CAMPOS: CAMPOS,
+    valorCampo: valorCampo,
+    PAGINA: { W: W, H: H }
   };
 })(window);

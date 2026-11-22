@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Cormorant+Garamond:ital,wght@1,600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=10">
+<link rel="stylesheet" href="styles.css?v=11">
 </head>
 <body>
 
@@ -48,7 +48,7 @@
     <button type="button" class="link forgot" id="btnOlvide">¿Olvidó su clave?</button>
     </div>
     <p class="error" id="loginError"></p>
-    <p class="ver">Versión 10 · ingreso con Google activado</p>
+    <p class="ver">Versión 11 · cursos ordenados y alta de funcionarios por nombre</p>
     <p class="demo-note hidden" id="demoNote">Modo demostración: los datos se guardan solo en este navegador y se acepta cualquier clave. Configure <code>config.js</code> para usar Apps Script.</p>
   </form>
 </section>
@@ -66,7 +66,7 @@
       <button data-view="archivo" data-mod="lic">Archivo</button>
       <button data-view="diplomas" data-mod="dip">Generar diplomas</button>
       <button data-view="dipArchivo" data-mod="dip">Diplomas emitidos</button>
-      <button data-view="colegio">Datos del colegio</button>
+      <button data-view="colegio" class="admin-only">Datos del colegio</button>
       <button data-view="usuarios" class="admin-only">Usuarios</button>
     </nav>
     <label class="year-pick" title="Año de trabajo: cambia solo el 1 de enero; los años anteriores quedan guardados">Año
@@ -209,8 +209,19 @@
           </div>
           <div id="dipImport" class="hidden">
             <div id="dipImportInfo"></div>
-            <div class="row mt-s"><button class="btn primary" id="btnDipImport">Agregar alumnos</button><button class="btn ghost" id="btnDipCancel">Cancelar</button></div>
+            <div class="row mt-s"><button class="btn primary" id="btnDipImport">Agregar alumnos nuevos</button><button class="btn ghost" id="btnDipCancel">Cancelar</button></div>
           </div>
+          <p class="muted small mt-s">Puede volver a cargar la lista cuando lleguen alumnos nuevos: la página la coteja y <b>agrega solo los que no están</b>.</p>
+          <details class="add-alumno">
+            <summary>+ Agregar un alumno a mano</summary>
+            <form id="dipAddForm" class="form-grid mt-s">
+              <label class="span2">Nombre completo<input name="nombre" required placeholder="Nombres y apellidos"></label>
+              <label>Curso<input name="curso" list="cursosList" required placeholder="Ej.: 3° Básico A" autocomplete="off"></label>
+              <label>R.U.N. o IPE <small class="muted">(opcional)</small><input name="run" placeholder="12.345.678-9 o 100.xxx.xxx-x"></label>
+              <div class="end span2"><button class="btn" type="submit">Agregar alumno</button></div>
+            </form>
+          </details>
+          <datalist id="cursosList"></datalist>
         </div>
         <div class="card">
           <h3>2. Motivo y fecha del diploma</h3>
@@ -352,15 +363,21 @@
           <h3>Autorizar funcionarios <span class="chip g-chip">Google</span></h3>
           <p class="muted">Ingresan con su cuenta <b>@andaliensur.cl</b> y la clave de su correo. Solo podrán entrar los correos de esta lista.</p>
           <div class="g-setup hidden" id="gSetup"></div>
-          <label>Correos (uno por línea; basta lo que va antes de la @)
-            <textarea name="texto" rows="6" required placeholder="juan.perez&#10;maria.soto&#10;pedro.rojas, Pedro Rojas Muñoz"></textarea>
-          </label>
-          <div class="row mt-s">
-            <label class="inline">Rol <select name="rol" style="width:auto"><option value="usuario">Usuario</option><option value="admin">Administrador</option></select></label>
-            <span class="spacer"></span>
-            <button class="btn primary" type="submit">Autorizar</button>
+          <div class="form-grid">
+            <label class="span2">Nombre completo<input name="nombre" required autocomplete="off" placeholder="Ej.: Juan Pérez Soto"></label>
+            <label class="span2">Correo <small class="muted">(se arma solo con el nombre; puede corregirlo)</small>
+              <span class="email-dom"><input name="email" required autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="juan.perez"><span class="dom">@andaliensur.cl</span></span>
+            </label>
+            <label>Rol <select name="rol"><option value="usuario">Usuario</option><option value="admin">Administrador</option></select></label>
+            <div class="end"><button class="btn primary" type="submit">Autorizar</button></div>
           </div>
-          <p class="muted small">El nombre se completa solo con el de su cuenta de Google la primera vez que ingresan. También puede pegar una columna de correos desde Excel.</p>
+          <details class="bulk mt-s">
+            <summary>Autorizar varios de una vez (pegar lista)</summary>
+            <label class="mt-s">Un funcionario por línea: nombre completo, o correo, o "correo, nombre"
+              <textarea name="texto" rows="5" placeholder="Juan Pérez Soto&#10;María José Fuentes Rojas&#10;pedro.rojas, Pedro Rojas Muñoz"></textarea>
+            </label>
+            <div class="row end mt-s"><button class="btn" type="button" id="btnBulkAut">Revisar lista</button></div>
+          </details>
         </form>
         <details class="card more-user">
         <summary>Usuario con clave propia de esta página (opcional)</summary>
@@ -400,8 +417,8 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="config.js?v=10"></script>
-<script src="licencia.js?v=10"></script>
-<script src="app.js?v=10"></script>
+<script src="config.js?v=11"></script>
+<script src="licencia.js?v=11"></script>
+<script src="app.js?v=11"></script>
 </body>
 </html>

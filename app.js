@@ -32,6 +32,31 @@
     if (isNaN(x)) return 1; if (isNaN(y)) return -1;
     return x - y || o;
   }
+  /* Cursos: nombre uniforme y orden escolar (Pre-Kínder, Kínder, 1°–8° Básico, 1°–4° Medio; luego la letra).
+     Las mismas reglas están en Code.gs (cursoCanonico_ / ordenCurso_). */
+  function sinTildes(s) { return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+  function cursoCanonico(s) {
+    var t = String(s || '').replace(/\s+/g, ' ').trim(), n = sinTildes(t).toLowerCase();
+    var L = /(?:^|[\s°º\-])([a-h])\s*$/i.exec(t), letra = L ? ' ' + L[1].toUpperCase() : '';
+    if (/pre\s*-?\s*kinder|prekinder|primer nivel de transicion|\bnt1\b|\bpk\b/.test(n)) return 'Pre-Kínder' + letra;
+    if (/kinder|segundo nivel de transicion|\bnt2\b|^k\b/.test(n)) return 'Kínder' + letra;
+    var g = /(\d{1,2})\s*(?:°|º|ro|do|to|vo|no|mo|er)?\s*(?:ano\s+)?(basico|basica|medio|media|b\b|m\b)/.exec(n);
+    if (g) return g[1] + '° ' + (/^b/.test(g[2]) ? 'Básico' : 'Medio') + letra;
+    return t;
+  }
+  function rangoCurso(c) {
+    var n = sinTildes(c).toLowerCase(), g;
+    if (/pre-?kinder/.test(n)) return 0;
+    if (/kinder/.test(n)) return 1;
+    if ((g = /(\d{1,2})° basico/.exec(n))) return 1 + Number(g[1]);
+    if ((g = /(\d{1,2})° medio/.exec(n))) return 9 + Number(g[1]);
+    return 99;
+  }
+  function ordenCurso(a, b) { return rangoCurso(a) - rangoCurso(b) || String(a).localeCompare(String(b), 'es', { numeric: true }); }
+  // Cursos del colegio (para elegir al agregar un alumno a mano)
+  var CURSOS_COLEGIO = ['Pre-Kínder A', 'Pre-Kínder B', 'Kínder A', 'Kínder B']
+    .concat([1, 2, 3, 4, 5, 6, 7, 8].reduce(function (a, n) { return a.concat([n + '° Básico A', n + '° Básico B']); }, []))
+    .concat([1, 2, 3, 4].reduce(function (a, n) { return a.concat([n + '° Medio A', n + '° Medio B', n + '° Medio C']); }, []));
   function maxOrden(list) { return list.reduce(function (m, x) { return Math.max(m, Number(x.orden) || 0); }, 0); }
   function penBtn() { return ' <button class="pen" data-act="nom" title="Corregir el nombre" aria-label="Corregir el nombre">✎</button>'; }
   function pick(o, keys) { var r = {}; keys.forEach(function (k) { if (o[k]) r[k] = o[k]; }); return r; }
@@ -126,8 +151,12 @@
       logout: function () { return true; },
       me: function (d, q, u) { return u; },
       getConfig: function (d) { return d.config; },
-      saveConfig: function (d, q) { Object.assign(d.config, q.config); return d.config; },
-      saveLogo: function (d, q) { d.config[q.tipo === 'ministerio' ? 'logoMinisterio' : 'logoColegio'] = q.dataUrl || ''; return d.config; },
+      saveConfig: function (d, q, u) {
+        if (u.rol !== 'admin' && Object.keys(q.config || {}).some(function (k) { return k !== 'anios'; })) throw new Error('Solo un administrador puede modificar los datos del colegio');
+        Object.assign(d.config, q.config); return d.config;
+      },
+      saveLogo: function (d, q, u) {
+        if (u.rol !== 'admin') throw new Error('Solo un administrador puede hacer esto'); d.config[q.tipo === 'ministerio' ? 'logoMinisterio' : 'logoColegio'] = q.dataUrl || ''; return d.config; },
       listStudents: function (d, q) { return listStud(d, q); },
       importStudents: imp,
       addStudent: function (d, q, u) { return imp(d, { nivel: q.nivel, anio: q.anio, students: [q.student] }, u); },
@@ -158,13 +187,14 @@
         var cnt = {}; d.dips.forEach(function (x) { if (x.anio === String(q.anio)) cnt[x.alumnoId] = (cnt[x.alumnoId] || 0) + 1; });
         return d.alumnos.filter(function (a) { return a.anio === String(q.anio); })
           .map(function (a) { return Object.assign({}, a, { diplomas: cnt[a.id] || 0 }); })
-          .sort(function (a, b) { return a.curso.localeCompare(b.curso, 'es', { numeric: true }) || (a.orden || 1e9) - (b.orden || 1e9) || a.nombre.localeCompare(b.nombre); });
+          .sort(function (a, b) { return ordenCurso(a.curso, b.curso) || (a.orden || 1e9) - (b.orden || 1e9) || a.nombre.localeCompare(b.nombre); });
       },
       importAlumnos: function (d, q, u) {
         d.alumnos = d.alumnos || []; var seen = {}, add = 0, om = 0;
         var del = d.alumnos.filter(function (a) { return a.anio === String(q.anio); }), orden = maxOrden(del);
         del.forEach(function (a) { seen[claveAlumno(a.run, a.nombre, a.curso)] = 1; });
         (q.alumnos || []).forEach(function (r) {
+          r = Object.assign({}, r, { curso: cursoCanonico(r.curso) });
           var k = claveAlumno(r.run, r.nombre, r.curso);
           if (!r.nombre || !r.curso || seen[k]) { om++; return; }
           seen[k] = 1; add++;
@@ -190,7 +220,11 @@
           .sort(function (a, b) { return String(b.emitido).localeCompare(String(a.emitido)) || a.nombre.localeCompare(b.nombre); });
       },
       deleteDiploma: function (d, q) { d.dips = (d.dips || []).filter(function (x) { return x.id !== q.id; }); return true; },
-      updateAlumno: function (d, q) { var a = (d.alumnos || []).filter(function (x) { return x.id === q.id; })[0]; Object.assign(a, q.alumno); return true; },
+      updateAlumno: function (d, q) {
+        var a = (d.alumnos || []).filter(function (x) { return x.id === q.id; })[0]; Object.assign(a, q.alumno);
+        if (q.alumno.curso !== undefined) a.curso = cursoCanonico(q.alumno.curso);
+        return true;
+      },
       renombrarDocumento: function (d, q) {
         var dip = q.tipo === 'diploma', r = (dip ? d.dips : d.lic).filter(function (x) { return x.id === q.id; })[0];
         r.nombre = q.nombre; r.datos = Object.assign({}, r.datos, { nombre: q.nombre });
@@ -231,6 +265,12 @@
       },
       autorizarCorreos: function (d, q) {
         var dom = '@' + (window.DOMINIO_CORREO || 'andaliensur.cl'), add = 0, om = [], inv = [];
+        (q.personas || []).forEach(function (x) {
+          var e = String(x.email || '').trim().toLowerCase(); if (e && e.indexOf('@') < 0) e += dom;
+          if (!e || e.slice(-dom.length) !== dom || !/^[^\s@]+@/.test(e)) return inv.push(x.email || x.nombre);
+          if (d.users.some(function (u) { return u.email === e; })) return om.push(e);
+          d.users.push({ id: id('u-'), nombre: x.nombre || e.split('@')[0], email: e, rol: q.rol, activo: true, conClave: false }); add++;
+        });
         String(q.texto || '').split(/\r?\n|;/).forEach(function (l) {
           l = l.trim(); if (!l) return;
           var p = l.split(/[,\t]/), partes = p.length === 2 && /\s/.test(p[1].trim()) && p[1].indexOf('@') < 0 ? [[p[0], p[1].trim()]]
@@ -493,6 +533,7 @@
     irA(mod === 'dip' ? 'diplomas' : 'emitir');
   }
   function irA(view) {
+    if ((view === 'colegio' || view === 'usuarios') && !(S.user && S.user.rol === 'admin')) view = S.modulo === 'dip' ? 'diplomas' : S.modulo === 'lic' ? 'emitir' : 'inicio';
     if (VISTA_MOD[view]) S.modulo = VISTA_MOD[view];
     S.view = view;
     var enInicio = view === 'inicio', dip = S.modulo === 'dip' && !enInicio;
@@ -570,7 +611,7 @@
     var pre = (def.insignias || []).filter(function (x) { return x.id === S.config.insignia; })[0];
     $('#brandLogo').src = S.config.logoColegio || (pre && pre.src) || def.colegio || '';
     var faltan = !S.config.colegio || !S.config.directora || !S.config.fecha;
-    $('#cfgHint').innerHTML = faltan ? '<span class="chip warn">Faltan datos del colegio</span>'
+    $('#cfgHint').innerHTML = faltan ? '<span class="chip warn">' + (S.user && S.user.rol === 'admin' ? 'Faltan datos del colegio' : 'Faltan datos del colegio: avise a un administrador') + '</span>'
       : 'Fecha de impresión: <b>' + esc((S.config.ciudad ? S.config.ciudad + ', ' : '') + Licencia.fechaLarga(S.config.fecha)) + '</b>' +
         (String(S.config.fecha).slice(0, 4) !== S.anio ? ' <span class="chip warn">La fecha es de otro año: actualícela en "Datos del colegio"</span>' : '');
     return Licencia.prepareAssets(S.config).then(function (a) { S.assets = a; });
@@ -880,7 +921,7 @@
       ordenNombresHtml(out, 'ordenLic') +
       '<label class="inline mt-s">N° de registro inicial <input type="number" id="regIni" min="1" value="' + firstN + '" style="width:90px"></label>' +
       '<p class="muted small">Se numeran en el <b>mismo orden de la lista</b> (' + esc(out[0].nombre) + ' = ' + firstN + ', …). Después puede editar cualquier número.</p>' +
-      (cfgRows ? '<div class="kvs">' + cfgRows + '</div><label class="check"><input type="checkbox" id="updCfg" checked> Usar estos datos en "Datos del colegio"</label>' : '') +
+      (cfgRows && S.user.rol === 'admin' ? '<div class="kvs">' + cfgRows + '</div><label class="check"><input type="checkbox" id="updCfg" checked> Usar estos datos en "Datos del colegio"</label>' : '') +
       '<div class="imp-list">' + out.slice(0, 5).map(function (s, i) {
         return '<div><span>' + (nums[i] != null ? nums[i] : firstN + i) + '</span>' + esc(s.nombre) + ' <small>' + esc(runFormat(s.run)) + '</small></div>';
       }).join('') + (out.length > 5 ? '<div class="muted">… y ' + (out.length - 5) + ' más</div>' : '') + '</div>';
@@ -950,10 +991,16 @@
             meta.colegio = tc(val);
           }
           else if (key === 'curso') {
+            // "310 Enseñanza Media H-C niños y jóvenes 4° medio C", "… Primer Nivel de Transición (Pre-kínder) A", etc.
             var g = /(\d{1,2})\s*°?\s*(?:a[ñn]o\s+)?(medio|b[áa]sico)\s*([A-Z])?\b/i.exec(val);
+            var parv = /pre\s*-?\s*k[ií]nder|primer nivel de transici[óo]n|k[ií]nder|segundo nivel de transici[óo]n/i.exec(val);
             if (g) {
               meta.curso = g[1] + '° ' + (/^m/i.test(g[2]) ? 'Medio' : 'Básico') + (g[3] ? ' ' + g[3].toUpperCase() : '');
               meta.nivelCurso = g[1] === '4' && /^m/i.test(g[2]) ? '4M' : g[1] === '8' && /^b/i.test(g[2]) ? '8B' : 'otro';
+            } else if (parv) {
+              var lp = /\b([A-H])\s*$/.exec(val.trim());
+              meta.curso = cursoCanonico(parv[0] + (lp ? ' ' + lp[1] : ''));
+              meta.nivelCurso = 'otro';
             }
           }
           else if (key === 'region') meta.region = tc(val.replace(/^(DE LA|DEL|DE)\s+/i, ''));
@@ -1210,7 +1257,7 @@
   S.alumnos = []; S.dipSel = {}; S.diplomas = []; S.dipCurso = ''; S.dipPending = null;
   function hoyISO() { var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
   $('#dipFecha').value = hoyISO();
-  function porCurso(a, b) { return String(a).localeCompare(String(b), 'es', { numeric: true }); }
+  var porCurso = ordenCurso;
 
   function loadDiplomas() {
     var anio = S.anio;
@@ -1218,7 +1265,8 @@
     $('#dipTitle2').textContent = 'Diplomas emitidos · ' + anio;
     return Promise.all([api('listAlumnos', { anio: anio }), api('listDiplomas', { anio: anio })]).then(function (r) {
       if (anio !== S.anio) return;
-      S.alumnos = r[0]; S.diplomas = r[1];
+      S.alumnos = r[0].sort(function (a, b) { return ordenCurso(a.curso, b.curso) || (a.orden || 1e9) - (b.orden || 1e9) || a.nombre.localeCompare(b.nombre); });
+      S.diplomas = r[1]; renderCursosList();
       var ids = {}; S.alumnos.forEach(function (a) { ids[a.id] = 1; });
       Object.keys(S.dipSel).forEach(function (k) { if (!ids[k]) delete S.dipSel[k]; });
       renderAlumnos(); renderDiplomas();
@@ -1325,19 +1373,53 @@
     leerArchivos(files).then(function (r) {
       var lista = r.students.map(function (s) {
         var curso = s.curso || (r.meta && r.meta.nivel === '8B' ? '8° Básico' : r.meta && r.meta.nivel === '4M' && !r.meta.curso ? '4° Medio' : '');
-        return { nombre: s.nombre, original: s.original, invertido: s.invertido, run: s.run, curso: curso };
+        return { nombre: s.nombre, original: s.original, invertido: s.invertido, run: s.run, curso: curso ? cursoCanonico(curso) : '' };
       });
       if (!lista.length) throw new Error('No se encontraron alumnos. Suba la "Lista de Curso" del SIGE, la nómina PDF, o un Excel/CSV con columnas "curso" y "nombre".');
       S.dipPending = lista;
       var sinCurso = lista.filter(function (a) { return !a.curso; }).length;
       var cursos = cursosDe(lista);
-      $('#dipImportInfo').innerHTML = '<div class="imp-head"><b>' + lista.length + '</b> alumnos detectados en <i>' + esc(r.nombre) + '</i> para el año <b>' + esc(S.anio) + '</b></div>' +
+      // Cotejo con los alumnos ya cargados este año: solo se agregarán los que no están (mismo RUN, o mismo nombre y curso si no tiene RUN real)
+      var ya = {};
+      S.alumnos.forEach(function (a) { ya[claveAlumno(a.run, a.nombre, a.curso)] = 1; });
+      var nuevos = lista.filter(function (a) {
+        var k1 = claveAlumno(a.run, a.nombre, a.curso), k2 = a.original ? claveAlumno(a.run, a.original, a.curso) : k1;
+        return !ya[k1] && !ya[k2];
+      });
+      var repetidos = lista.length - nuevos.length;
+      $('#dipImportInfo').innerHTML = '<div class="imp-head"><b>' + lista.length + '</b> alumnos en <i>' + esc(r.nombre) + '</i> para el año <b>' + esc(S.anio) + '</b></div>' +
+        '<div class="cotejo"><span class="chip ok">' + nuevos.length + ' nuevo' + (nuevos.length === 1 ? '' : 's') + ' se agregará' + (nuevos.length === 1 ? '' : 'n') + '</span>' +
+        (repetidos ? '<span class="chip pend">' + repetidos + ' ya estaba' + (repetidos === 1 ? '' : 'n') + ' en la lista (se omite' + (repetidos === 1 ? '' : 'n') + ')</span>' : '') + '</div>' +
+        (nuevos.length && repetidos ? '<div class="imp-list">' + nuevos.slice(0, 8).map(function (a) {
+          return '<div><span>+</span>' + esc(a.nombre) + ' <small>' + esc(a.curso) + '</small></div>'; }).join('') +
+          (nuevos.length > 8 ? '<div class="muted">… y ' + (nuevos.length - 8) + ' más</div>' : '') + '</div>' : '') +
         (cursos.length ? '<div class="kvs mt-s">' + cursos.map(function (c) { return '<span class="kv"><small>' + c[1] + ' alumnos</small>' + esc(c[0]) + '</span>'; }).join('') + '</div>' : '') +
-        (sinCurso ? '<label class="mt-s">Curso para los ' + sinCurso + ' alumnos sin curso<input id="dipCursoDef" placeholder="Ej.: 3° Básico A"></label>' : '') +
+        (sinCurso ? '<label class="mt-s">Curso para los ' + sinCurso + ' alumnos sin curso<input id="dipCursoDef" list="cursosList" placeholder="Ej.: 3° Básico A"></label>' : '') +
         ordenNombresHtml(lista, 'ordenDip');
       $('#dipImport').classList.remove('hidden');
     }).catch(function (e) { toast(e.message || 'No se pudo leer el archivo', true); }).then(function () { busy(false); });
   }
+  // Lista de cursos para elegir (los del colegio + los que ya existan en la base)
+  function renderCursosList() {
+    var set = {}; CURSOS_COLEGIO.concat(S.alumnos.map(function (a) { return a.curso; })).forEach(function (c) { if (c) set[c] = 1; });
+    $('#cursosList').innerHTML = Object.keys(set).sort(ordenCurso).map(function (c) { return '<option value="' + esc(c) + '">'; }).join('');
+  }
+  renderCursosList();
+  /* Agregar un alumno a mano (p. ej. uno que llegó a mitad de año) */
+  $('#dipAddForm').addEventListener('submit', function (e) {
+    e.preventDefault(); var f = e.target;
+    var a = { nombre: f.nombre.value.replace(/\s+/g, ' ').trim(), curso: cursoCanonico(f.curso.value), run: f.run.value.trim() ? runFormat(f.run.value) : '' };
+    if (a.run && !runValid(a.run) && !runEsIPE(a.run) && !window.confirm('El R.U.N. ' + a.run + ' no parece válido. ¿Agregar de todas formas?')) return;
+    var k = claveAlumno(a.run, a.nombre, a.curso);
+    var ya = S.alumnos.filter(function (x) { return claveAlumno(x.run, x.nombre, x.curso) === k; })[0];
+    if (ya) return toast(ya.nombre + ' ya está en la lista (' + ya.curso + ')', true);
+    busy(true, 'Agregando…');
+    api('importAlumnos', { anio: S.anio, alumnos: [a] }).then(function (r) {
+      if (!r.agregados) toast('Ese alumno ya está en la lista', true);
+      else { toast(a.nombre + ' agregado a ' + a.curso); f.nombre.value = ''; f.run.value = ''; f.nombre.focus(); }
+      return loadDiplomas();
+    }).catch(function (err) { toast(err.message, true); }).then(function () { busy(false); });
+  });
   $('#btnDipCancel').addEventListener('click', function () { S.dipPending = null; $('#dipImport').classList.add('hidden'); });
   $('#btnDipImport').addEventListener('click', function () {
     var def = $('#dipCursoDef') ? $('#dipCursoDef').value.trim() : '';
@@ -1346,7 +1428,8 @@
     busy(true, 'Agregando alumnos…');
     api('importAlumnos', { anio: S.anio, alumnos: lista }).then(function (r) {
       S.dipPending = null; $('#dipImport').classList.add('hidden');
-      toast(r.agregados + ' alumnos agregados' + (r.omitidos ? ' · ' + r.omitidos + ' omitidos (repetidos o sin curso)' : ''));
+      toast(r.agregados + ' alumno' + (r.agregados === 1 ? '' : 's') + ' nuevo' + (r.agregados === 1 ? '' : 's') + ' agregado' + (r.agregados === 1 ? '' : 's') +
+        (r.omitidos ? ' · ' + r.omitidos + ' ya estaba' + (r.omitidos === 1 ? '' : 'n') + ' en la lista' : ''));
       return loadDiplomas();
     }).catch(function (e) { toast(e.message, true); }).then(function () { busy(false); });
   });
@@ -1450,19 +1533,71 @@
     var i = this.value.indexOf('@'); if (i >= 0 && this.value.slice(i + 1).toLowerCase() === DOMINIO) this.value = this.value.slice(0, i);
   });
 
-  /* Autorizar una lista de correos para ingresar con Google */
-  $('#autForm').addEventListener('submit', function (e) {
-    e.preventDefault(); var f = e.target;
+  /* ---- Correo institucional propuesto desde el nombre: "Juan Pérez Soto" -> juan.perez ----
+     2-3 palabras: primer nombre + primer apellido; 4 o más: primer nombre + 3ª palabra (dos nombres y dos apellidos).
+     Es solo una propuesta: el administrador puede corregirla. */
+  function correoDesdeNombre(nombre) {
+    var PART = { de: 1, del: 1, la: 1, las: 1, los: 1, y: 1, da: 1, van: 1, von: 1 };
+    var w = sinTildes(nombre).toLowerCase().replace(/[^a-z\s'-]/g, ' ').replace(/['-]/g, '').split(/\s+/)
+      .filter(function (x) { return x && !PART[x]; });
+    if (!w.length) return '';
+    var ape = w.length >= 4 ? w[2] : w[1];
+    return w[0] + (ape ? '.' + ape : '');
+  }
+  // Conecta un campo "nombre" con su campo "correo": se completa solo mientras el usuario no lo haya editado a mano
+  function autoCorreo(f) {
+    var tocado = false;
+    f.elements.nombre.addEventListener('input', function () { if (!tocado) f.elements.email.value = correoDesdeNombre(this.value); });
+    f.elements.email.addEventListener('input', function () {
+      var i = this.value.indexOf('@'); if (i >= 0 && this.value.slice(i + 1).toLowerCase() === DOMINIO) this.value = this.value.slice(0, i);
+      tocado = this.value.trim() !== '';
+    });
+    f.addEventListener('reset', function () { tocado = false; });
+  }
+
+  function autorizar(personas, rol) {
     busy(true, 'Autorizando…');
-    api('autorizarCorreos', { texto: f.texto.value, rol: f.rol.value }).then(function (r) {
+    return api('autorizarCorreos', { personas: personas, rol: rol }).then(function (r) {
       renderUsers(r.lista); busy(false);
-      if (!r.invalidos.length) f.texto.value = '';
-      else f.texto.value = r.invalidos.join('\n'); // deja a la vista solo los que hay que corregir
-      openDlg('Funcionarios autorizados', '<p class="inv-ok">✓ ' + r.agregados + ' correo' + (r.agregados === 1 ? '' : 's') + ' autorizado' + (r.agregados === 1 ? '' : 's') + '.</p>' +
+      var una = personas.length === 1 && r.agregados === 1;
+      if (una) toast('✓ ' + personas[0].nombre + ' autorizado(a): ' + personas[0].email);
+      else openDlg('Funcionarios autorizados', '<p class="inv-ok">✓ ' + r.agregados + ' funcionario' + (r.agregados === 1 ? '' : 's') + ' autorizado' + (r.agregados === 1 ? '' : 's') + '.</p>' +
         (r.omitidos.length ? '<p class="muted small">Ya estaban en la lista: ' + esc(r.omitidos.join(', ')) + '</p>' : '') +
         (r.invalidos.length ? '<p class="inv-err">No se agregaron (deben ser @' + esc(DOMINIO) + '): <b>' + esc(r.invalidos.join(', ')) + '</b></p>' : '') +
         '<p class="muted small">Ya pueden entrar con el botón <b>"Acceder con Google"</b> usando su correo y la clave de su correo.</p>');
-    }).catch(function (err) { toast(err.message, true); }).then(function () { busy(false); });
+      return r;
+    }).catch(function (err) { busy(false); toast(err.message, true); throw err; });
+  }
+  autoCorreo($('#autForm'));
+  autoCorreo($('#userForm'));
+  // Autorizar a una persona: nombre -> correo propuesto (editable) -> Autorizar
+  $('#autForm').addEventListener('submit', function (e) {
+    e.preventDefault(); var f = e.target;
+    var p = { nombre: f.nombre.value.replace(/\s+/g, ' ').trim(), email: correoCompleto(f.email.value) };
+    if (S.users && S.users.some(function (u) { return String(u.email).toLowerCase() === p.email; })) return toast(p.email + ' ya está en la lista', true);
+    autorizar([p], f.rol.value).then(function (r) {
+      if (r.agregados) { f.nombre.value = ''; f.email.value = ''; f.dispatchEvent(new Event('reset')); f.nombre.focus(); }
+    }).catch(function () {});
+  });
+  // Varios a la vez: cada línea puede ser un nombre, un correo o "correo, nombre". Se revisan los correos antes de autorizar.
+  $('#btnBulkAut').addEventListener('click', function () {
+    var f = $('#autForm'), filas = [];
+    f.texto.value.split(/\r?\n/).forEach(function (l) {
+      l = l.trim(); if (!l) return;
+      var p = l.split(/[,;\t]/).map(function (x) { return x.trim(); }).filter(Boolean), email = '', nombre = '';
+      p.forEach(function (x) { if (/@/.test(x) || (!/\s/.test(x) && /\./.test(x))) email = x; else nombre = nombre || x; });
+      if (!email) email = correoDesdeNombre(nombre);
+      filas.push({ nombre: nombre, email: email.replace('@' + DOMINIO, '') });
+    });
+    if (!filas.length) return toast('Escriba al menos un funcionario', true);
+    openDlg('Revisar ' + filas.length + ' funcionario' + (filas.length === 1 ? '' : 's'),
+      '<p class="muted small">Revise los correos propuestos y corrija los que haga falta.</p><div class="bulk-list">' + filas.map(function (x, i) {
+        return '<div class="bulk-row"><span>' + esc(x.nombre || '—') + '</span><span class="email-dom"><input data-i="' + i + '" value="' + esc(x.email) + '"><span class="dom">@' + esc(DOMINIO) + '</span></span></div>';
+      }).join('') + '</div>').then(function (ok) {
+      if (!ok) return;
+      var personas = filas.map(function (x, i) { return { nombre: x.nombre, email: correoCompleto($('#dlgBody input[data-i="' + i + '"]').value) }; });
+      autorizar(personas, f.rol.value).then(function () { f.texto.value = ''; }).catch(function () {});
+    });
   });
   // Aviso para el administrador mientras el ingreso con Google no esté configurado
   if (!GID) $('#gSetup').classList.remove('hidden');

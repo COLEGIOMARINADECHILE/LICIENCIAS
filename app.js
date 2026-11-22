@@ -162,9 +162,9 @@
         if (u.rol !== 'admin') throw new Error('Solo un administrador puede hacer esto');
         if (q.tipo === 'portada') { d.config.logoPortada = q.dataUrl || ''; return d.config; } d.config[q.tipo === 'ministerio' ? 'logoMinisterio' : 'logoColegio'] = q.dataUrl || ''; return d.config; },
       listStudents: function (d, q) { return listStud(d, q); },
-      importStudents: imp,
-      addStudent: function (d, q, u) { return imp(d, { nivel: q.nivel, anio: q.anio, students: [q.student] }, u); },
-      updateStudent: function (d, q) { var s = d.students.filter(function (x) { return x.id === q.id; })[0]; Object.assign(s, q.student); return true; },
+      importStudents: function (d, q, u) { soloAdmin(u); return imp(d, q, u); },
+      addStudent: function (d, q, u) { soloAdmin(u); return imp(d, { nivel: q.nivel, anio: q.anio, students: [q.student] }, u); },
+      updateStudent: function (d, q, u) { soloAdmin(u); var s = d.students.filter(function (x) { return x.id === q.id; })[0]; Object.assign(s, q.student); return true; },
       deleteStudent: function (d, q, u) { soloAdmin(u); var ids = q.ids || [q.id]; d.students = d.students.filter(function (x) { return ids.indexOf(x.id) < 0; }); return ids.length; },
       emitir: function (d, q, u) {
         var c = d.config, faltan = ['colegio', 'rbd', 'region', 'provincia', 'comuna', 'directora', 'fecha'].filter(function (k) { return !c[k]; });
@@ -178,7 +178,7 @@
             colegio: c.colegio, rbd: c.rbd, region: c.region, provincia: c.provincia, comuna: c.comuna, anioEscolar: s.anio,
             directora: c.directora, cargo: c.cargo || 'Director(a) del Establecimiento', ciudad: c.ciudad, fecha: c.fecha, modeloId: q.modeloId || '' };
           d.lic = d.lic.filter(function (l) { return l.studentId !== s.id; });
-          d.lic.push({ id: id('l-'), studentId: s.id, nivel: s.nivel, anio: s.anio, registro: s.registro, nombre: s.nombre, run: s.run, emitida: now, emitidaPor: u.nombre, datos: rec });
+          d.lic.push({ id: id('l-'), studentId: s.id, nivel: s.nivel, anio: s.anio, registro: s.registro, nombre: s.nombre, run: s.run, emitida: now, emitidaPor: u.nombre, emitidaPorId: u.id, datos: rec });
           return rec;
         });
       },
@@ -581,17 +581,19 @@
   /* Dos módulos separados: Licencias (lic) y Diplomas (dip). Cada uno con sus pestañas, datos y colores.
      "Datos del colegio" y "Usuarios" son comunes y se muestran dentro del módulo activo. */
   S.view = 'inicio'; S.archFiltro = 'todas'; S.modulo = '';
-  var VISTA_MOD = { emitir: 'lic', archivo: 'lic', diplomas: 'dip', dipArchivo: 'dip' };
+  // 'admin' = panel de administración aparte (Datos del colegio, Usuarios, Modelos), solo administradores
+  var VISTA_MOD = { emitir: 'lic', archivo: 'lic', diplomas: 'dip', dipArchivo: 'dip', colegio: 'admin', usuarios: 'admin', modelos: 'admin' };
   function irModulo(mod) {
     S.modulo = mod;
     try { localStorage.setItem('lic_modulo', mod); } catch (e) {}
-    irA(mod === 'dip' ? 'diplomas' : 'emitir');
+    irA(mod === 'dip' ? 'diplomas' : mod === 'admin' ? 'colegio' : 'emitir');
   }
   function irA(view) {
     if ((view === 'colegio' || view === 'usuarios' || view === 'modelos') && !(S.user && S.user.rol === 'admin')) view = S.modulo === 'dip' ? 'diplomas' : S.modulo === 'lic' ? 'emitir' : 'inicio';
     if (VISTA_MOD[view]) S.modulo = VISTA_MOD[view];
     S.view = view;
-    var enInicio = view === 'inicio', dip = S.modulo === 'dip' && !enInicio;
+    var enInicio = view === 'inicio', dip = S.modulo === 'dip' && !enInicio, adm = S.modulo === 'admin' && !enInicio;
+    document.body.classList.toggle('modo-admin', adm);
     document.body.classList.toggle('en-inicio', enInicio);
     document.body.classList.toggle('modo-dip', dip);
     $$('#modswitch button').forEach(function (x) { x.classList.toggle('on', !enInicio && x.dataset.mod === S.modulo); });
@@ -599,7 +601,8 @@
       x.classList.toggle('hidden', enInicio || (x.dataset.mod && x.dataset.mod !== S.modulo) || false);
       x.classList.toggle('active', x.dataset.view === view);
     });
-    $('#brandTitle').textContent = enInicio ? 'Licencias y Diplomas' : dip ? 'Diplomas' : 'Licencias';
+    $('#brandTitle').textContent = enInicio ? 'Licencias y Diplomas' : adm ? 'Administración' : dip ? 'Diplomas' : 'Licencias';
+    $('.year-pick').classList.toggle('hidden', adm);
     $$('.view').forEach(function (v) { v.classList.toggle('hidden', v.id !== 'view-' + view); });
     $('.actionbar').classList.toggle('hidden', view !== 'emitir');
     // el curso activo (4° Medio / 8° Básico) es solo de Licencias
@@ -788,11 +791,12 @@
       var dup = s.registro && regs[s.registro] > 1;
       return '<tr data-id="' + esc(s.id) + '">' +
         '<td><input type="checkbox" class="sel"' + (S.selected[s.id] ? ' checked' : '') + '></td>' +
-        '<td class="name">' + esc(s.nombre) + penBtn() + '</td>' +
+        '<td class="name">' + esc(s.nombre) + (esAdmin() ? penBtn() : '') + '</td>' +
         '<td>' + esc(runFormat(s.run)) + runChip(s.run) + '</td>' +
-        '<td><input class="reg' + (dup ? ' dup' : '') + '" value="' + esc(s.registro) + '" inputmode="numeric" title="' + (dup ? 'N° repetido' : '') + '"></td>' +
+        (esAdmin() ? '<td><input class="reg' + (dup ? ' dup' : '') + '" value="' + esc(s.registro) + '" inputmode="numeric" title="' + (dup ? 'N° repetido' : '') + '"></td>'
+          : '<td><b>' + esc(s.registro) + '</b></td>') + // solo el administrador cambia el N° de registro
         '<td>' + (s.emitida ? '<span class="chip ok">Emitida ' + esc(fmtDate(s.emitida).split(' ')[0]) + '</span>' : '<span class="chip pend">Pendiente</span>') + '</td>' +
-        '<td class="actions"><button class="link" data-act="pdf">PDF</button><button class="link" data-act="edit">Editar</button>' + (esAdmin() ? '<button class="link danger" data-act="del">Eliminar</button>' : '') + '</td></tr>';
+        '<td class="actions"><button class="link" data-act="pdf">PDF</button>' + (esAdmin() ? '<button class="link" data-act="edit">Editar</button><button class="link danger" data-act="del">Eliminar</button>' : '') + '</td></tr>';
     }).join('');
     $('#studEmpty').classList.toggle('hidden', S.students.length > 0);
     $('#studCount').textContent = S.students.length ? '· ' + S.students.length + ' estudiantes · ' + Licencia.NIVELES[S.nivel].curso : '';
@@ -1237,11 +1241,12 @@
       });
     });
   }
+  var BUFS = {}; // id -> bytes del PDF del modelo (para leer sus textos al ajustar automáticamente)
   function fondoDe(id) {
     if (!FONDOS[id]) {
       FONDOS[id] = api('getModeloArchivo', { id: id }).then(function (r) { return fetch(r.dataUrl); })
         .then(function (x) { return x.arrayBuffer(); })
-        .then(function (buf) { return pdfAImagen(buf, 2600); })
+        .then(function (buf) { BUFS[id] = buf.slice(0); return pdfAImagen(buf, 2600); })
         .then(function (img) { img.alias = 'fondo' + id; return img; })
         .catch(function (e) { delete FONDOS[id]; throw e; });
     }
@@ -1354,10 +1359,11 @@
     e.preventDefault(); var f = e.target, file = f.archivo.files[0];
     if (!file) return;
     if (file.size > 15 * 1024 * 1024) return toast('El PDF debe pesar menos de 15 MB', true);
-    var modo = f.querySelector('input[name="modo"]:checked').value, img;
+    var modo = f.querySelector('input[name="modo"]:checked').value, img, bytes;
     busy(true, 'Leyendo el diseño…');
     file.arrayBuffer().then(function (buf) {
       if (String.fromCharCode.apply(null, new Uint8Array(buf.slice(0, 5))).indexOf('%PDF') !== 0) throw new Error('El archivo no es un PDF');
+      bytes = buf.slice(0); // copia: pdf.js se queda con el original
       return pdfAImagen(buf, 2600);
     }).then(function (im) {
       img = im;
@@ -1369,10 +1375,18 @@
         campos: CAMPOS_INICIALES[f.tipo.value].map(completarCampo), zona: ZONA_DEF, aclarar: 0,
         dataUrl: dataUrl.replace(/^data:[^;]*;/, 'data:application/pdf;') });
     }).then(function (m) {
-      img.alias = 'fondo' + m.id; FONDOS[m.id] = Promise.resolve(img);
-      S.modelos.push(m); renderModeloSelects(); renderModelos(); f.reset(); $('#modLogosWrap').classList.add('hidden');
-      busy(false); toast('Modelo "' + m.nombre + '" guardado. Ahora ajústelo para que todo se lea bien.');
-      abrirEditor(m);
+      img.alias = 'fondo' + m.id; FONDOS[m.id] = Promise.resolve(img); BUFS[m.id] = bytes;
+      f.reset(); $('#modLogosWrap').classList.add('hidden');
+      // la información se ajusta sola al diseño (luego se puede revisar y retocar)
+      busy(true, 'Ajustando la información al diseño…');
+      return ajustarAuto(m).then(function (aj) {
+        return api('guardarModelo', { id: m.id, campos: aj.campos, zona: aj.zona });
+      }).then(function (l) {
+        S.modelos = l; renderModeloSelects(); renderModelos(); busy(false);
+        var mm = S.modelos.filter(function (x) { return x.id === m.id; })[0] || m;
+        toast('Modelo "' + mm.nombre + '" guardado y ajustado automáticamente. Revise la vista previa.');
+        abrirEditor(mm);
+      }, function () { S.modelos.push(m); renderModeloSelects(); renderModelos(); busy(false); abrirEditor(m); });
     }).catch(function (err) { busy(false); toast(err.message || 'No se pudo leer el PDF', true); });
   });
   $('#modList').addEventListener('click', function (e) {
@@ -1388,6 +1402,205 @@
         .catch(function (err) { toast(err.message, true); });
     });
   });
+
+  /* ======================= Ajuste automático de la información al modelo =======================
+     Se analiza el PDF del diseño:
+       · sus TEXTOS (pdf.js): "otorga a", "por su", "Director(a)", "Fecha", "R.U.N.", "Registro"…
+       · sus LÍNEAS dibujadas (líneas de firma o para escribir el nombre)
+       · sus ESPACIOS VACÍOS (bandas horizontales sin tinta dentro del marco)
+     y con eso se ubica cada dato donde corresponde, con un tamaño que quepa en ese espacio.
+     Para modelos de "solo marco" se mide el marco y se calcula la zona del texto. */
+  function mapaTinta(img) {
+    return new Promise(function (res) {
+      var el = new Image();
+      el.onload = function () {
+        var W = 520, H = Math.round(W * img.h / img.w), c = document.createElement('canvas'); c.width = W; c.height = H;
+        var g = c.getContext('2d'); g.drawImage(el, 0, 0, W, H);
+        var px = g.getImageData(0, 0, W, H).data, hist = {}, best = null, bn = 0;
+        // color de fondo = el más frecuente (papel blanco, crema, celeste…)
+        for (var i = 0; i < px.length; i += 16) {
+          var k = (px[i] >> 4) + ',' + (px[i + 1] >> 4) + ',' + (px[i + 2] >> 4);
+          hist[k] = (hist[k] || 0) + 1; if (hist[k] > bn) { bn = hist[k]; best = k; }
+        }
+        var bg = best.split(',').map(function (v) { return Number(v) * 16 + 8; }), ink = new Uint8Array(W * H);
+        for (var p = 0, j = 0; p < px.length; p += 4, j++) {
+          var d = Math.abs(px[p] - bg[0]) + Math.abs(px[p + 1] - bg[1]) + Math.abs(px[p + 2] - bg[2]);
+          ink[j] = d > 70 ? 1 : 0;
+        }
+        res({ w: W, h: H, ink: ink });
+      };
+      el.onerror = function () { res(null); };
+      el.src = img.data;
+    });
+  }
+  function textosPdf(buf) {
+    if (!buf) return Promise.resolve([]);
+    return loadPdfJs().then(function () { return pdfjsLib.getDocument({ data: new Uint8Array(buf.slice(0)) }).promise; })
+      .then(function (pdf) { return pdf.getPage(1); }).then(function (page) {
+        var vp = page.getViewport({ scale: 1 });
+        return page.getTextContent().then(function (tc) {
+          return tc.items.filter(function (it) { return it.str && it.str.trim(); }).map(function (it) {
+            var p = vp.convertToViewportPoint(it.transform[4], it.transform[5]), h = Math.abs(it.transform[3]) || it.height || 10;
+            return { s: sinTildes(it.str).toLowerCase().trim(), x0: p[0] / vp.width, x1: (p[0] + it.width) / vp.width,
+              y: (p[1] - h * 0.35) / vp.height, h: h / vp.height };
+          });
+        });
+      }).catch(function () { return []; });
+  }
+  // fracción de tinta de la fila y entre las columnas x0..x1 (fracciones)
+  function filaTinta(m, y, x0, x1) {
+    var r = Math.min(m.h - 1, Math.max(0, Math.round(y * m.h))), a = Math.round(x0 * m.w), b = Math.round(x1 * m.w), n = 0;
+    for (var x = a; x < b; x++) n += m.ink[r * m.w + x];
+    return n / Math.max(1, b - a);
+  }
+  function colTinta(m, x, y0, y1) {
+    var c = Math.min(m.w - 1, Math.max(0, Math.round(x * m.w))), a = Math.round(y0 * m.h), b = Math.round(y1 * m.h), n = 0;
+    for (var y = a; y < b; y++) n += m.ink[y * m.w + c];
+    return n / Math.max(1, b - a);
+  }
+  /* Marco: desde cada borde hacia adentro.
+     1) Si hay líneas o adornos densos del marco (filas/columnas con mucha tinta) en el 25 % exterior,
+        la zona empieza justo después del más interior.
+     2) Si no, se busca la primera tinta y luego una franja limpia (2 % de la hoja). */
+  function autoZona(m) {
+    var lado = function (paso, prueba) {
+      var ultimo = -1, t;
+      for (t = 0; t < 0.25; t += paso) if (prueba(t) > 0.75) ultimo = t; // líneas del marco: cruzan casi toda la hoja
+      if (ultimo >= 0) return Math.min(0.35, ultimo + 0.025);
+      var visto = false, run = 0;
+      for (t = 0; t < 0.4; t += paso) {
+        if (prueba(t) >= 0.02) { visto = true; run = 0; }
+        else if (visto) { run += paso; if (run >= 0.02) return Math.min(0.35, Math.max(0.03, t - 0.02 + 0.012)); }
+      }
+      return 0.06;
+    };
+    var py = 1 / m.h, px = 1 / m.w;
+    var top = lado(py, function (t) { return filaTinta(m, t, 0.05, 0.95); });
+    var bot = lado(py, function (t) { return filaTinta(m, 1 - t, 0.05, 0.95); });
+    var izq = lado(px, function (t) { return colTinta(m, t, 0.05, 0.95); });
+    var der = lado(px, function (t) { return colTinta(m, 1 - t, 0.05, 0.95); });
+    return { x: izq, y: top, w: Math.max(0.2, 1 - izq - der), h: Math.max(0.2, 1 - top - bot) };
+  }
+  // Líneas horizontales dibujadas (para escribir o firmar) dentro de la zona
+  function lineasDe(m, z) {
+    var out = [], y0 = Math.round(z.y * m.h), y1 = Math.round((z.y + z.h) * m.h), x0 = Math.round(z.x * m.w), x1 = Math.round((z.x + z.w) * m.w);
+    for (var y = y0 + 3; y < y1 - 3; y++) {
+      // todos los tramos largos de la fila (puede haber dos o más líneas de firma a la misma altura)
+      var tramos = [], run = 0, s = 0;
+      for (var x = x0; x <= x1; x++) {
+        var on = x < x1 && m.ink[y * m.w + x];
+        if (on) { if (!run) s = x; run++; }
+        else { if (run >= 0.1 * m.w) tramos.push([s, run]); run = 0; }
+      }
+      tramos.forEach(function (tr) {
+        // debe ser delgada: arriba y abajo (a 3 px) casi sin tinta en ese tramo
+        var a = tr[0] / m.w, b = (tr[0] + tr[1]) / m.w;
+        if (filaTinta(m, (y - 3) / m.h, a, b) > 0.25 || filaTinta(m, (y + 3) / m.h, a, b) > 0.25) return;
+        var l = { y: y / m.h, x0: a, x1: b };
+        var dup = out.some(function (o) { return Math.abs(o.y - l.y) < 4 / m.h && Math.abs(o.x0 - l.x0) < 0.02; }); // misma línea (2-3 px)
+        if (!dup) out.push(l);
+      });
+    }
+    return out;
+  }
+  // Bandas horizontales vacías dentro de la zona (alto mínimo 3 % de la hoja)
+  function bandasVacias(m, z) {
+    var out = [], ini = null;
+    for (var y = z.y; y <= z.y + z.h; y += 1 / m.h) {
+      var vacia = filaTinta(m, y, z.x + 0.02, z.x + z.w - 0.02) < 0.004;
+      if (vacia && ini === null) ini = y;
+      if ((!vacia || y + 1 / m.h > z.y + z.h) && ini !== null) { if (y - ini >= 0.03) out.push({ y0: ini, y1: y, h: y - ini, c: (ini + y) / 2 }); ini = null; }
+    }
+    return out;
+  }
+  function autoCampos(tipo, m, textos, pg) {
+    var z = autoZona(m), lineas = lineasDe(m, z), bandas = bandasVacias(m, z), campos = [];
+    var mmH = pg[1], ptA = function (fr) { return fr * mmH / 0.3528; }; // alto en fracción -> puntos
+    var busca = function (re, min, max) { return textos.filter(function (t) { return re.test(t.s) && t.y >= (min || 0) && t.y <= (max || 1); }); };
+    var usadas = [];
+    var tomaBanda = function (desde, minH) {
+      var b = bandas.filter(function (b) { return b.y0 >= desde - 0.005 && b.h >= (minH || 0.03) && usadas.indexOf(b) < 0; })[0];
+      if (b) usadas.push(b); return b;
+    };
+    var add = function (c) { campos.push(completarCampo(c)); };
+    var cx = z.x + z.w / 2;
+    if (tipo === 'diploma' || tipo === 'licencia') {
+      // ---- nombre ----
+      var claveNom = busca(/(otorga|otorgad|concede|confiere|entrega|reconoce|certific|distingue|a don\b|a dona\b|al alumno|a la alumna|estudiante|alumno\(a\)|presente diploma)/, 0.15, 0.75)[0];
+      var lineaNom = lineas.filter(function (l) { return l.y > 0.3 && l.y < 0.8 && l.x1 - l.x0 >= 0.28 && (!claveNom || l.y > claveNom.y); })[0];
+      var yNom = null, sNom = 34, wNom = z.w * 0.9, xNom = cx;
+      if (lineaNom) { yNom = lineaNom.y - 0.035; xNom = (lineaNom.x0 + lineaNom.x1) / 2; wNom = (lineaNom.x1 - lineaNom.x0) * 0.96; }
+      else {
+        var bN = claveNom ? tomaBanda(claveNom.y + claveNom.h * 0.6, 0.05) : null;
+        if (!bN) { bN = bandas.filter(function (b) { return b.c > 0.3 && b.c < 0.72; }).sort(function (a, b) { return b.h - a.h; })[0]; if (bN) usadas.push(bN); }
+        if (bN) { yNom = bN.c; sNom = Math.max(18, Math.min(40, ptA(bN.h) * 0.6)); }
+      }
+      if (yNom != null) add({ k: 'nombre', x: xNom, y: yNom, s: sNom, f: 'script', w: Math.min(0.9, wNom), c: '#081e48' });
+      if (tipo === 'diploma') {
+        // ---- curso (debajo del nombre, si hay espacio) ----
+        var tc = busca(/\bcurso\b/)[0];
+        if (tc) add({ k: 'curso', x: tc.x1 + 0.01, y: tc.y, s: 12, f: 'serif', st: 'bold', a: 'left', w: 0.3 });
+        else if (yNom != null) {
+          var debajo = yNom + 0.06;
+          if (filaTinta(m, debajo, xNom - 0.12, xNom + 0.12) < 0.01 && filaTinta(m, debajo + 0.012, xNom - 0.12, xNom + 0.12) < 0.01)
+            add({ k: 'curso', x: xNom, y: debajo, s: 11, f: 'serif', st: 'bold', w: 0.4 });
+        }
+        // ---- motivo ----
+        var claveMot = busca(/(por su|por haber|en reconocimiento|reconocimiento a|por destac|motivo|^por\b)/, (yNom || 0.3) - 0.02, 0.85)[0];
+        var bM = tomaBanda(claveMot ? claveMot.y + claveMot.h * 0.6 : (yNom || 0.45) + 0.07, 0.035);
+        // el motivo va a continuación del texto que lo introduce ("por su…"), no al medio de todo el espacio libre
+        if (bM && bM.c < 0.85) add({ k: 'motivo', x: cx, y: bM.y0 + Math.min(bM.h / 2, 0.045), s: Math.max(11, Math.min(16, ptA(Math.min(bM.h, 0.09)) * 0.45)), f: 'serif', st: 'bold', w: z.w * 0.9 });
+      }
+      // ---- firmas y fecha (parte baja) ----
+      var bajas = lineas.filter(function (l) { return l.y > 0.62 && l.x1 - l.x0 < 0.45; }).sort(function (a, b) { return a.x0 - b.x0; });
+      var etiqueta = function (l) { return textos.filter(function (t) { return t.y > l.y && t.y < l.y + 0.07 && t.x1 > l.x0 && t.x0 < l.x1; }).map(function (t) { return t.s; }).join(' '); };
+      var lDir = bajas.filter(function (l) { return /(director|rector)/.test(etiqueta(l)); })[0];
+      var lFec = bajas.filter(function (l) { return /(fecha|lugar)/.test(etiqueta(l)); })[0];
+      var tDir = busca(/(director|rector)/, 0.55)[0], tFec = busca(/(fecha|lugar)/, 0.55)[0];
+      if (!lDir && bajas.length) lDir = bajas[bajas.length - 1];
+      if (!lFec && bajas.length > 1 && bajas[0] !== lDir) lFec = bajas[0];
+      var sobre = function (l) { return { x: (l.x0 + l.x1) / 2, y: l.y - 0.022, w: (l.x1 - l.x0) * 0.98 }; };
+      if (lDir) { var d = sobre(lDir); add({ k: 'directora', x: d.x, y: d.y, s: 12, f: 'serif', st: 'bold', w: d.w }); }
+      else if (tDir) add({ k: 'directora', x: (tDir.x0 + tDir.x1) / 2, y: tDir.y - tDir.h * 1.8, s: 12, f: 'serif', st: 'bold', w: 0.32 });
+      else add({ k: 'directora', x: z.x + z.w * 0.75, y: z.y + z.h - 0.06, s: 12, f: 'serif', st: 'bold', w: z.w * 0.4 });
+      if (lFec) { var f = sobre(lFec); add({ k: 'lugarFecha', x: f.x, y: f.y, s: 12, f: 'serif', st: 'italic', w: f.w }); }
+      else if (tFec) add({ k: 'lugarFecha', x: (tFec.x0 + tFec.x1) / 2, y: tFec.y - tFec.h * 1.8, s: 12, f: 'serif', st: 'italic', w: 0.32 });
+      else add({ k: 'lugarFecha', x: z.x + z.w * 0.25, y: z.y + z.h - 0.06, s: 12, f: 'serif', st: 'italic', w: z.w * 0.4 });
+      // líneas de firma que sobran -> fila de firmas adicionales (solo diplomas)
+      var resto = bajas.filter(function (l) { return l !== lDir && l !== lFec; });
+      if (tipo === 'diploma' && resto.length) {
+        var a = Math.min.apply(null, resto.map(function (l) { return l.x0; })), b = Math.max.apply(null, resto.map(function (l) { return l.x1; }));
+        add({ k: 'firmas', x: (a + b) / 2, y: resto[0].y, s: 11, f: 'serif', st: 'bold', w: b - a });
+      }
+      if (tipo === 'licencia') {
+        // datos que suelen ir junto a su rótulo: "R.U.N.:", "Registro N°", "Año"
+        var junto = function (re, k, s) { var t = busca(re)[0]; if (t) add({ k: k, x: t.x1 + 0.008, y: t.y, s: s || 13, f: 'serif', st: 'bold', a: 'left', w: 0.25 }); return !!t; };
+        if (!junto(/(r\.?\s?u\.?\s?[nt]\.?|\brut\b|\brun\b)\s*:?$/, 'run', 14) && yNom != null)
+          add({ k: 'run', x: xNom, y: yNom + 0.075, s: 14, f: 'serif', st: 'bold', w: 0.4 });
+        junto(/registro.*$/, 'registro'); junto(/\bano\b\s*:?$/, 'anio');
+      }
+    }
+    // separar datos encimados (se estima la altura de cada texto)
+    var alto = function (c) { return c.s * 0.3528 * 1.25 / mmH; };
+    campos.sort(function (a, b) { return a.y - b.y; });
+    for (var i = 1; i < campos.length; i++) for (var j = 0; j < i; j++) {
+      var A = campos[j], B = campos[i], ancho = function (c) { return c.w / 2; };
+      var choca = Math.abs(A.x - B.x) < ancho(A) + ancho(B) - 0.02 && Math.abs(A.y - B.y) < (alto(A) + alto(B)) / 2;
+      if (choca) B.y = Math.min(0.97, A.y + (alto(A) + alto(B)) / 2 + 0.005);
+    }
+    return { zona: z, campos: campos, info: { lineas: lineas.length, bandas: bandas.length, textos: textos.length } };
+  }
+  // Ajusta el modelo: devuelve los cambios a guardar (campos y/o zona)
+  function ajustarAuto(m) {
+    var pg = m.orient === 'portrait' ? [Licencia.PAGINA.H, Licencia.PAGINA.W] : [Licencia.PAGINA.W, Licencia.PAGINA.H];
+    return fondoDe(m.id).then(function (img) {
+      return Promise.all([mapaTinta(img), textosPdf(BUFS[m.id])]);
+    }).then(function (r) {
+      if (!r[0]) throw new Error('No se pudo analizar el diseño');
+      var res = autoCampos(m.tipo, r[0], r[1], pg);
+      return { zona: res.zona, campos: res.campos, info: res.info };
+    });
+  }
 
   /* ---- Editor del modelo ---- */
   var ED = null;
@@ -1463,7 +1676,9 @@
     }
     if (soloPagina) return;
     var vertical = ED.m.orient === 'portrait';
-    var cab = '<div class="md-modo"><b>¿Qué trae el PDF?</b>' +
+    var cab = '<button type="button" class="btn primary block" id="mdAuto">✨ Ajustar automáticamente</button>' +
+      '<p class="muted small">La página lee el diseño (sus textos, líneas y espacios libres) y ubica cada dato donde corresponde. Después puede retocar a mano.</p>' +
+      '<div class="md-modo"><b>¿Qué trae el PDF?</b>' +
       '<label class="check"><input type="radio" name="mdModo" value="campos"' + (fondo ? '' : ' checked') + '> El diseño completo: ubico solo los datos</label>' +
       '<label class="check' + (vertical ? ' muted' : '') + '"><input type="radio" name="mdModo" value="fondo"' + (fondo ? ' checked' : '') + (vertical ? ' disabled' : '') + '> Solo el marco: la página escribe todo el texto</label></div>' +
       '<label>Aclarar el diseño de fondo: <b id="mdAclVal">' + Math.round(ED.aclarar * 100) + '%</b> <small class="muted">(hace que los datos resalten)</small>' +
@@ -1500,7 +1715,15 @@
       '<label class="check span2"><input type="checkbox" data-p="bg"' + (c.bg ? ' checked' : '') + '> Fondo blanco detrás <small class="muted">(tapa líneas o letras del diseño que queden debajo)</small></label>' +
       '</div><p class="muted small">Posición: ' + Math.round(c.x * 1000) / 10 + '% · ' + Math.round(c.y * 1000) / 10 + '%</p>';
   }
-  $('#mdCampos').addEventListener('change', function (e) {
+  $('#mdCampos').addEventListener('click', function (e) {
+    if (e.target.id !== 'mdAuto' || !ED) return;
+    busy(true, 'Ajustando la información al diseño…');
+    ajustarAuto(ED.m).then(function (aj) {
+      busy(false); ED.campos = aj.campos; ED.zona = aj.zona; ED.overlay = null;
+      ED.sel = ED.campos[0] ? ED.campos[0].k : null; renderEditor();
+      toast('Listo: ' + aj.campos.length + ' datos ubicados según el diseño. Revise con "Vista previa PDF".');
+    }).catch(function (err) { busy(false); toast(err.message, true); });
+  });  $('#mdCampos').addEventListener('change', function (e) {
     var t = e.target;
     if (t.name === 'mdModo') { ED.modo = t.value; return renderEditor(); }
     if (t.dataset.g === 'logos') { ED.logos = t.checked; ED.overlay = null; return renderEditor(); }
@@ -1615,6 +1838,8 @@
       S.licencias = l; renderArchivo();
     }).catch(function (e) { toast(e.message, true); });
   }
+  // licencia emitida por este usuario (puede corregir su nombre); las antiguas se comparan por nombre del emisor
+  function licPropia(l) { return l.emitidaPorId ? l.emitidaPorId === S.user.id : l.emitidaPor === S.user.nombre; }
   function esImpresa(l) { return l.impresa === true || l.impresa === 'TRUE' || l.impresa === 'true'; }
   function filteredLic() {
     var q = norm($('#archSearch').value), f = S.archFiltro;
@@ -1639,7 +1864,7 @@
       var ok = esImpresa(l);
       return '<tr data-id="' + esc(l.id) + '" class="' + (ok ? 'row-ok' : '') + '">' +
         '<td><label class="tick"><input type="checkbox" class="imp"' + (ok ? ' checked' : '') + '><span></span></label></td>' +
-        '<td><b>' + esc(l.registro) + '</b></td><td class="name">' + esc(l.nombre) + penBtn() + '</td><td>' + esc(runFormat(l.run)) +
+        '<td><b>' + esc(l.registro) + '</b></td><td class="name">' + esc(l.nombre) + (esAdmin() || licPropia(l) ? penBtn() : '') + '</td><td>' + esc(runFormat(l.run)) +
         '</td><td>' + esc(fmtDate(l.emitida)) + '</td><td>' + esc(l.emitidaPor) + '</td><td class="actions"><button class="link" data-act="dl">Descargar PDF</button>' +
         (S.user.rol === 'admin' ? '<button class="link danger" data-act="del">Quitar</button>' : '') + '</td></tr>';
     }).join('');
@@ -1692,7 +1917,7 @@
   $('#archTable tbody').addEventListener('click', function (e) {
     var b = e.target.closest('button[data-act]'); if (!b) return;
     var l = S.licencias.filter(function (x) { return x.id === b.closest('tr').dataset.id; })[0];
-    if (b.dataset.act === 'nom') renombrar('licencia', l, 'estudiantes de ' + Licencia.NIVELES[S.nivel].curso, function () { loadArchivo(); loadStudents(); }, function () {
+    if (b.dataset.act === 'nom') renombrar('licencia', l, esAdmin() ? 'estudiantes de ' + Licencia.NIVELES[S.nivel].curso : '', function () { loadArchivo(); loadStudents(); }, function () {
       return confirmDlg('Nombre corregido', '¿Descargar ahora la licencia de <b>' + esc(l.nombre) + '</b> con el nombre corregido?').then(function (ok) { if (ok) savePdf(licRecords([l])); });
     });
     else if (b.dataset.act === 'dl') savePdf(licRecords([l]));

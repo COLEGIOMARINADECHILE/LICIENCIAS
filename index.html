@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Cormorant+Garamond:ital,wght@1,600&family=Great+Vibes&family=Cinzel+Decorative:wght@700&family=Crimson+Text:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=14">
+<link rel="stylesheet" href="styles.css?v=15">
 </head>
 <body>
 
@@ -49,7 +49,7 @@
     </div>
     <p class="error" id="loginError"></p>
     <p class="login-aviso" id="loginAviso"></p>
-    <p class="ver">Versión 14 · modelos legibles y cierre de sesión seguro</p>
+    <p class="ver">Versión 15 · ajuste automático y panel de administración</p>
     <p class="demo-note hidden" id="demoNote">Modo demostración: los datos se guardan solo en este navegador y se acepta cualquier clave. Configure <code>config.js</code> para usar Apps Script.</p>
   </form>
 </section>
@@ -61,15 +61,16 @@
     <div class="modswitch" id="modswitch" role="tablist" aria-label="Módulo">
       <button data-mod="lic" class="on"><span>🎓</span>Licencias</button>
       <button data-mod="dip"><span>★</span>Diplomas</button>
+      <button data-mod="admin" class="admin-only mod-admin" title="Datos del colegio, usuarios y modelos"><span>⚙</span>Administración</button>
     </div>
     <nav class="tabs" id="tabs">
       <button data-view="emitir" data-mod="lic" class="active">Emitir</button>
       <button data-view="archivo" data-mod="lic">Archivo</button>
       <button data-view="diplomas" data-mod="dip">Generar diplomas</button>
       <button data-view="dipArchivo" data-mod="dip">Diplomas emitidos</button>
-      <button data-view="modelos" class="admin-only">Modelos</button>
-      <button data-view="colegio" class="admin-only">Datos del colegio</button>
-      <button data-view="usuarios" class="admin-only">Usuarios</button>
+      <button data-view="colegio" data-mod="admin" class="admin-only">Datos del colegio</button>
+      <button data-view="usuarios" data-mod="admin" class="admin-only">Usuarios</button>
+      <button data-view="modelos" data-mod="admin" class="admin-only">Modelos de licencias y diplomas</button>
     </nav>
     <label class="year-pick" title="Año de trabajo: cambia solo el 1 de enero; los años anteriores quedan guardados">Año
       <select id="anio"></select>
@@ -95,6 +96,10 @@
           <span class="hc-icon">★</span><b>Diplomas de Reconocimiento</b>
           <span>Para alumnos de todos los cursos: seleccione varios, elija el motivo y la fecha, y quedan guardados.</span>
           <em id="homeDip">Entrar →</em>
+        </button>        <button class="home-card adm admin-only" data-go="admin">
+          <span class="hc-icon">⚙</span><b>Administración</b>
+          <span>Datos del colegio, usuarios autorizados y modelos de licencias y diplomas. Solo para administradores.</span>
+          <em>Entrar →</em>
         </button>
       </div>
     </div>
@@ -115,7 +120,8 @@
     <!-- ---------- EMITIR ---------- -->
     <div class="view" id="view-emitir">
 
-      <div class="grid2">
+      <p class="user-only card nota-usuario">Seleccione a los estudiantes y pulse <b>Generar PDF y guardar</b>. La lista de estudiantes y sus datos los carga y corrige un administrador.</p>
+      <div class="grid2 admin-only">
         <div class="card">
           <h3>1. Cargar lista de estudiantes</h3>
           <p class="muted"><b>“Lista de Curso”</b> del SIGE (puede subir 4° A, B y C juntas), <b>“Nómina de Alumnos Licenciados”</b> del Mineduc, o Excel/CSV con columnas <b>nombre</b> y <b>run</b>. <a href="plantilla_estudiantes.csv" download>Plantilla Excel/CSV</a></p>
@@ -146,8 +152,8 @@
         <div class="card-head">
           <h3>2. N° de registro por estudiante <span class="count" id="studCount"></span></h3>
           <div class="row">
-            <label class="inline">Numerar vacíos desde <input type="number" id="autoFrom" min="1" style="width:80px"></label>
-            <button class="btn ghost sm" id="btnAuto">Aplicar</button>
+            <label class="inline admin-only">Numerar vacíos desde <input type="number" id="autoFrom" min="1" style="width:80px"></label>
+            <button class="btn ghost sm admin-only" id="btnAuto">Aplicar</button>
           </div>
         </div>
         <div class="table-wrap">
@@ -484,8 +490,8 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="config.js?v=14"></script>
-<script src="licencia.js?v=14"></script>
-<script src="app.js?v=14"></script>
+<script src="config.js?v=15"></script>
+<script src="licencia.js?v=15"></script>
+<script src="app.js?v=15"></script>
 </body>
 </html>

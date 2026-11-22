@@ -433,3 +433,13 @@ body:not(.is-admin) #view-diplomas .grid2 { grid-template-columns: 1fr; }
 .portada-logo img { width: 84px; height: 84px; object-fit: contain; border-radius: 50%; background: #fff; box-shadow: 0 0 0 2px var(--gold-soft), 0 0 0 3px var(--gold); }
 .salio { display: block; color: var(--ink); background: #eef6ee; border-radius: 8px; padding: 8px 10px; font-weight: 500; }
 .salio a { color: var(--navy); }
+
+/* ===== v15: panel de administración aparte, ajuste automático ===== */
+body.modo-admin { --bg: #eef0f3; --navy: #2b3445; --navy-2: #3d4a60; --gold-soft: #e3e7ee; }
+.modswitch button.mod-admin.on { background: #2b3445; }
+.home-card.adm { background: linear-gradient(140deg, #232a37, #46536b); }
+body:not(.is-admin) .home-card.adm { display: none; }
+.user-only { display: none; }
+body:not(.is-admin) .user-only { display: block; }
+.nota-usuario { font-size: 14px; color: var(--ink); background: #f3f6fb; border-left: 4px solid var(--navy); }
+#mdAuto { margin-bottom: 2px; }

@@ -471,23 +471,45 @@
     var m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(h || ''));
     return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : C.navy;
   }
+  // Recuadro blanco detrás de un texto, para que se lea aunque el diseño tenga líneas o letras debajo
+  function tapar(doc, x, y, w, h) {
+    doc.setFillColor(255, 255, 255);
+    doc.roundedRect(x, y, w, h, 1.2, 1.2, 'F');
+  }
   function drawModelo(doc, r, assets, opts, m, estandar) {
     var pg = pagina(m);
+    // el fondo llega ya "aclarado" si el administrador lo pidió (m.fondo se prepara en la página)
     if (m.fondo) doc.addImage(m.fondo.data, 'JPEG', 0, 0, pg.w, pg.h, m.fondo.alias, 'FAST');
     if (m.modo === 'fondo') {
-      // diseño del sistema sobre el fondo: sin su marco ni marca de agua; logos solo si el administrador lo pidió
+      // diseño del sistema sobre el fondo: sin su marco ni marca de agua; logos solo si el administrador lo pidió.
+      // Se dibuja reducido dentro de la "zona del texto" para no pisar el marco del diseño.
       var a = m.logos ? { colegio: assets.colegio, ministerio: assets.ministerio } : {};
-      return estandar(doc, r, a, Object.assign({}, opts, { borde: false }));
+      var z = m.zona || { x: 0, y: 0, w: 1, h: 1 };
+      var x0 = z.x * pg.w, y0 = z.y * pg.h, zw = z.w * pg.w, zh = z.h * pg.h;
+      var s = Math.min(zw / W, zh / H), dx = (zw - s * W) / 2, dy = (zh - s * H) / 2, k = 72 / 25.4;
+      var tx = k * (x0 + dx), ty = k * (pg.h - y0 - dy - s * pg.h);
+      doc.internal.write('q ' + s.toFixed(5) + ' 0 0 ' + s.toFixed(5) + ' ' + tx.toFixed(2) + ' ' + ty.toFixed(2) + ' cm');
+      estandar(doc, r, a, Object.assign({}, opts, { borde: false }));
+      doc.internal.write('Q');
+      return;
     }
     (m.campos || []).forEach(function (c) {
+      var size = Number(c.s) || 14, ancho = (Number(c.w) || 0.8) * pg.w, cx = c.x * pg.w, cy = c.y * pg.h;
       if (c.k === 'firmas') { // fila de firmas adicionales (línea, nombre y cargo de cada una)
-        return filaFirmas(doc, firmasDe(r), c.x * pg.w, c.y * pg.h, (Number(c.w) || 0.8) * pg.w, { size: Number(c.s) || 12, color: hexRgb(c.c), f: c.f, st: c.st });
+        var fs = firmasDe(r); if (!fs.length) return;
+        if (c.bg) tapar(doc, cx - ancho / 2 - 2, cy - 4, ancho + 4, 15);
+        return filaFirmas(doc, fs, cx, cy, ancho, { size: size, color: hexRgb(c.c), f: c.f, st: c.st });
       }
       var t = valorCampo(r, c.k); if (!t) return;
-      var size = Number(c.s) || 14;
       setF(doc, c.f || 'serif', c.st || 'normal', size, hexRgb(c.c));
-      fit(doc, t, (Number(c.w) || 0.8) * pg.w, size, 6);
-      doc.text(t, c.x * pg.w, c.y * pg.h, { align: c.a || 'center', baseline: 'middle' });
+      var sz = fit(doc, t, ancho, size, 6);
+      if (c.bg) {
+        var tw = doc.getTextWidth(t), th = sz * 0.3528 * 1.35, pad = 2;
+        var left = c.a === 'left' ? cx : c.a === 'right' ? cx - tw : cx - tw / 2;
+        tapar(doc, left - pad, cy - th / 2 - 0.6, tw + pad * 2, th + 1.2);
+        setF(doc, c.f || 'serif', c.st || 'normal', sz, hexRgb(c.c)); // el color de relleno cambió: se restablece la letra
+      }
+      doc.text(t, cx, cy, { align: c.a || 'center', baseline: 'middle' });
     });
   }
   // Construye el PDF con el diseño del sistema o con un modelo: opts.modelos[r.modeloId] (el que usó cada

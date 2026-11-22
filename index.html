@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Cormorant+Garamond:ital,wght@1,600&family=Great+Vibes&family=Cinzel+Decorative:wght@700&family=Crimson+Text:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=13">
+<link rel="stylesheet" href="styles.css?v=14">
 </head>
 <body>
 
@@ -48,7 +48,8 @@
     <button type="button" class="link forgot" id="btnOlvide">¿Olvidó su clave?</button>
     </div>
     <p class="error" id="loginError"></p>
-    <p class="ver">Versión 13 · modelos en PDF y firmas adicionales</p>
+    <p class="login-aviso" id="loginAviso"></p>
+    <p class="ver">Versión 14 · modelos legibles y cierre de sesión seguro</p>
     <p class="demo-note hidden" id="demoNote">Modo demostración: los datos se guardan solo en este navegador y se acepta cualquier clave. Configure <code>config.js</code> para usar Apps Script.</p>
   </form>
 </section>
@@ -161,7 +162,7 @@
       <div class="actionbar">
         <span id="selInfo">0 seleccionados</span>
         <label class="inline mod-pick hidden">Modelo <select id="modLic"></select></label>
-        <button class="btn ghost danger" id="btnDelSel" title="Eliminar de la lista a los estudiantes seleccionados">Eliminar</button>
+        <button class="btn ghost danger admin-only" id="btnDelSel" title="Eliminar de la lista a los estudiantes seleccionados">Eliminar</button>
         <button class="btn ghost" id="btnPreview">Vista previa</button>
         <button class="btn primary" id="btnEmitir">3. Generar PDF y guardar</button>
       </div>
@@ -376,6 +377,15 @@
           <label class="btn" style="flex-direction:row;cursor:pointer">Subir otra insignia<input type="file" accept="image/png,image/jpeg" data-logo="colegio" hidden></label>
           <span class="muted" style="font-size:12px">Escudo de Chile: fijo, en alta resolución.</span>
         </div>
+        <h3 class="mt">Logo de la portada y de los correos</h3>
+        <p class="muted">Aparece en la pantalla de ingreso, en la barra superior y en los correos de bienvenida e invitación. Es independiente de la insignia de las licencias.</p>
+        <div class="portada-logo">
+          <img id="portadaPrev" alt="Logo de la portada">
+          <div class="row">
+            <label class="btn" style="flex-direction:row;cursor:pointer">Subir logo de portada<input type="file" accept="image/png,image/jpeg" data-logo="portada" hidden></label>
+            <button type="button" class="btn ghost" id="btnPortadaDef">Usar el predeterminado</button>
+          </div>
+        </div>
         <div class="row end mt">
           <button type="button" class="btn ghost" id="btnCfgPreview">Vista previa</button>
           <button class="btn primary" type="submit">Guardar datos</button>
@@ -474,8 +484,8 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="config.js?v=13"></script>
-<script src="licencia.js?v=13"></script>
-<script src="app.js?v=13"></script>
+<script src="config.js?v=14"></script>
+<script src="licencia.js?v=14"></script>
+<script src="app.js?v=14"></script>
 </body>
 </html>

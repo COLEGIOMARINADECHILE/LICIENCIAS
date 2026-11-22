@@ -144,6 +144,7 @@
     var DEMO_PDF = {};
     function soloAdmin(u) { if (u.rol !== 'admin') throw new Error('Solo un administrador puede hacer esto'); }
     var A = {
+      portada: function (d) { return { colegio: d.config.colegio || '', logo: d.config.logoPortada || '' }; },
       listUsers: function (d) { return d.users.filter(function (u) { return u.activo && u.conClave !== false; }).map(function (u) { return { id: u.id, nombre: u.nombre }; }); },
       login: function (d, q) {
         var u = d.users.filter(function (x) { return x.id === q.userId && x.activo; })[0];
@@ -158,12 +159,13 @@
         Object.assign(d.config, q.config); return d.config;
       },
       saveLogo: function (d, q, u) {
-        if (u.rol !== 'admin') throw new Error('Solo un administrador puede hacer esto'); d.config[q.tipo === 'ministerio' ? 'logoMinisterio' : 'logoColegio'] = q.dataUrl || ''; return d.config; },
+        if (u.rol !== 'admin') throw new Error('Solo un administrador puede hacer esto');
+        if (q.tipo === 'portada') { d.config.logoPortada = q.dataUrl || ''; return d.config; } d.config[q.tipo === 'ministerio' ? 'logoMinisterio' : 'logoColegio'] = q.dataUrl || ''; return d.config; },
       listStudents: function (d, q) { return listStud(d, q); },
       importStudents: imp,
       addStudent: function (d, q, u) { return imp(d, { nivel: q.nivel, anio: q.anio, students: [q.student] }, u); },
       updateStudent: function (d, q) { var s = d.students.filter(function (x) { return x.id === q.id; })[0]; Object.assign(s, q.student); return true; },
-      deleteStudent: function (d, q) { var ids = q.ids || [q.id]; d.students = d.students.filter(function (x) { return ids.indexOf(x.id) < 0; }); return ids.length; },
+      deleteStudent: function (d, q, u) { soloAdmin(u); var ids = q.ids || [q.id]; d.students = d.students.filter(function (x) { return ids.indexOf(x.id) < 0; }); return ids.length; },
       emitir: function (d, q, u) {
         var c = d.config, faltan = ['colegio', 'rbd', 'region', 'provincia', 'comuna', 'directora', 'fecha'].filter(function (k) { return !c[k]; });
         if (faltan.length) throw new Error('Complete los datos del colegio antes de emitir: ' + faltan.join(', '));
@@ -262,13 +264,13 @@
       },
       subirModelo: function (d, q, u) {
         soloAdmin(u); d.modelos = d.modelos || [];
-        var m = { id: id('m-'), tipo: q.tipo, nombre: q.nombre, modo: q.modo, orient: q.orient, logos: !!q.logos, campos: q.campos || [], creado: new Date().toISOString(), creadoPor: u.nombre };
+        var m = { id: id('m-'), tipo: q.tipo, nombre: q.nombre, modo: q.modo, orient: q.orient, logos: !!q.logos, campos: q.campos || [], creado: new Date().toISOString(), creadoPor: u.nombre, zona: q.zona, aclarar: q.aclarar || 0 };
         DEMO_PDF[m.id] = q.dataUrl; try { localStorage.setItem('lic_demo_pdf_' + m.id, q.dataUrl); } catch (e) {}
         d.modelos.push(m); return m;
       },
       guardarModelo: function (d, q, u) {
         soloAdmin(u); var m = (d.modelos || []).filter(function (x) { return x.id === q.id; })[0];
-        ['nombre', 'modo', 'logos', 'campos'].forEach(function (k) { if (q[k] != null) m[k] = q[k]; }); return d.modelos;
+        ['nombre', 'modo', 'logos', 'campos', 'zona', 'aclarar'].forEach(function (k) { if (q[k] != null) m[k] = q[k]; }); return d.modelos;
       },
       eliminarModelo: function (d, q, u) { soloAdmin(u); d.modelos = (d.modelos || []).filter(function (x) { return x.id !== q.id; }); return d.modelos; },
       // demo: simula Google con el correo escrito (en producción lo valida Google)
@@ -327,7 +329,7 @@
             var d = load();
             try {
               var u = null;
-              if (['listUsers', 'login', 'loginGoogle', 'solicitarCodigo', 'restablecerClave'].indexOf(q.action) < 0) {
+              if (['listUsers', 'login', 'loginGoogle', 'solicitarCodigo', 'restablecerClave', 'portada'].indexOf(q.action) < 0) {
                 var uid = d.tokens[q.token]; u = d.users.filter(function (x) { return x.id === uid; })[0];
                 if (!u) throw new Error('SESION_EXPIRADA');
               }
@@ -497,7 +499,38 @@
     $('#app').classList.add('hidden'); $('#login').classList.remove('hidden');
     loadUsers();
   }
-  $('#btnLogout').addEventListener('click', function () { api('logout').catch(function () {}); logoutLocal(); });
+  /* Salir: cierra la sesión en el servidor, en esta pestaña y en las demás pestañas abiertas, y recarga la página
+     para que no quede ningún dato en memoria. motivo: 'salir' | 'inactividad' */
+  var saliendo = false;
+  function salir(motivo) {
+    if (saliendo) return; saliendo = true;
+    busy(true, 'Cerrando sesión…');
+    var fin = function () {
+      ss('del', 'lic_token'); S.token = null;
+      try { localStorage.removeItem('lic_last_user'); localStorage.setItem('lic_logout', String(Date.now())); } catch (e) {}
+      try { if (window.google && google.accounts) google.accounts.id.disableAutoSelect(); } catch (e) {}
+      location.replace(location.pathname + '?salio=' + (motivo || 'salir'));
+    };
+    (S.token ? api('logout') : Promise.resolve()).then(fin, fin);
+  }
+  $('#btnLogout').addEventListener('click', function () { salir('salir'); });
+  // si se cierra sesión en otra pestaña, esta también se cierra
+  window.addEventListener('storage', function (e) {
+    if (e.key === 'lic_logout' && S.token) { ss('del', 'lic_token'); S.token = null; location.replace(location.pathname + '?salio=salir'); }
+  });
+  // cierre automático tras 30 minutos sin actividad (computadores compartidos)
+  (function () {
+    var MIN = 30, ultimo = Date.now();
+    ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach(function (ev) { document.addEventListener(ev, function () { ultimo = Date.now(); }, { passive: true }); });
+    setInterval(function () { if (S.token && Date.now() - ultimo > MIN * 60000) salir('inactividad'); }, 30000);
+  })();
+  // aviso en la pantalla de ingreso después de salir
+  (function () {
+    var m = /[?&]salio=(\w+)/.exec(location.search); if (!m) return;
+    history.replaceState(null, '', location.pathname);
+    $('#loginAviso').innerHTML = '<span class="salio">' + (m[1] === 'inactividad' ? 'Su sesión se cerró por inactividad.' : '✓ Sesión cerrada.') +
+      ' Si usa un computador compartido, cierre también su cuenta de Google: <a href="https://accounts.google.com/Logout" target="_blank" rel="noopener">cerrar sesión de Google</a>.</span>';
+  })();
 
   function startApp(user, claveIngresada) {
     S.user = user;
@@ -632,7 +665,7 @@
     $('#brandSchool').textContent = S.config.colegio || 'Configure los datos del colegio';
     var def = window.LICENCIA_ASSETS || {};
     var pre = (def.insignias || []).filter(function (x) { return x.id === S.config.insignia; })[0];
-    $('#brandLogo').src = S.config.logoColegio || (pre && pre.src) || def.colegio || '';
+    aplicarPortada(S.config.logoPortada);
     var faltan = !S.config.colegio || !S.config.directora || !S.config.fecha;
     $('#cfgHint').innerHTML = faltan ? '<span class="chip warn">' + (S.user && S.user.rol === 'admin' ? 'Faltan datos del colegio' : 'Faltan datos del colegio: avise a un administrador') + '</span>'
       : 'Fecha de impresión: <b>' + esc((S.config.ciudad ? S.config.ciudad + ', ' : '') + Licencia.fechaLarga(S.config.fecha)) + '</b>' +
@@ -679,10 +712,36 @@
       var f = inp.files[0]; if (!f) return;
       if (f.size > 4 * 1024 * 1024) { toast('La imagen debe pesar menos de 4 MB', true); inp.value = ''; return; }
       var rd = new FileReader();
-      rd.onload = function () { saveLogo(inp.dataset.logo, rd.result); inp.value = ''; };
+      rd.onload = function () {
+        var tipo = inp.dataset.logo; inp.value = '';
+        // el logo de portada se reduce a 600 px (carga rápida de la portada y correos livianos)
+        (tipo === 'portada' ? achicarImagen(rd.result, 600) : Promise.resolve(rd.result)).then(function (u) { saveLogo(tipo, u); });
+      };
       rd.readAsDataURL(f);
     });
   });
+  function achicarImagen(dataUrl, max) {
+    return new Promise(function (res) {
+      var im = new Image();
+      im.onload = function () {
+        var k = Math.min(1, max / Math.max(im.naturalWidth, im.naturalHeight)), c = document.createElement('canvas');
+        c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k);
+        var g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(im, 0, 0, c.width, c.height);
+        res(c.toDataURL('image/png'));
+      };
+      im.onerror = function () { res(dataUrl); };
+      im.src = dataUrl;
+    });
+  }
+  $('#btnPortadaDef').addEventListener('click', function () { saveLogo('portada', ''); });
+  /* Logo de la portada: el subido por el administrador o el predeterminado de config.js */
+  function logoPortada() { return S.config.logoPortada || (window.LICENCIA_ASSETS || {}).colegio || ''; }
+  function aplicarPortada(logo, colegio) {
+    var src = logo || (window.LICENCIA_ASSETS || {}).colegio || '';
+    $('#heroLogo').src = src; $('#brandLogo').src = src; if ($('#portadaPrev')) $('#portadaPrev').src = src;
+    if (colegio) $('#heroSchool').textContent = colegio;
+    try { if (logo) localStorage.setItem('lic_portada_logo', logo); else localStorage.removeItem('lic_portada_logo'); } catch (e) {}
+  }
   /* ---- Selector de insignias (el escudo de Chile es fijo) ---- */
   function renderInsignias() {
     var def = window.LICENCIA_ASSETS || {}, list = def.insignias || [], c = S.config;
@@ -706,7 +765,7 @@
   });
   function saveLogo(tipo, dataUrl) {
     busy(true, 'Guardando logo…');
-    api('saveLogo', { tipo: tipo, dataUrl: dataUrl }).then(function (c) { S.config = c; renderInsignias(); return refreshAssets(); })
+    api('saveLogo', { tipo: tipo, dataUrl: dataUrl }).then(function (c) { S.config = c; renderInsignias(); aplicarPortada(c.logoPortada); return refreshAssets(); })
       .then(function () { toast('Logo actualizado'); }).catch(function (e) { toast(e.message, true); }).then(function () { busy(false); });
   }
 
@@ -733,7 +792,7 @@
         '<td>' + esc(runFormat(s.run)) + runChip(s.run) + '</td>' +
         '<td><input class="reg' + (dup ? ' dup' : '') + '" value="' + esc(s.registro) + '" inputmode="numeric" title="' + (dup ? 'N° repetido' : '') + '"></td>' +
         '<td>' + (s.emitida ? '<span class="chip ok">Emitida ' + esc(fmtDate(s.emitida).split(' ')[0]) + '</span>' : '<span class="chip pend">Pendiente</span>') + '</td>' +
-        '<td class="actions"><button class="link" data-act="pdf">PDF</button><button class="link" data-act="edit">Editar</button><button class="link danger" data-act="del">Eliminar</button></td></tr>';
+        '<td class="actions"><button class="link" data-act="pdf">PDF</button><button class="link" data-act="edit">Editar</button>' + (esAdmin() ? '<button class="link danger" data-act="del">Eliminar</button>' : '') + '</td></tr>';
     }).join('');
     $('#studEmpty').classList.toggle('hidden', S.students.length > 0);
     $('#studCount').textContent = S.students.length ? '· ' + S.students.length + ' estudiantes · ' + Licencia.NIVELES[S.nivel].curso : '';
@@ -1188,13 +1247,36 @@
     }
     return FONDOS[id];
   }
+  // "Aclarar el diseño": se cubre el fondo con blanco semitransparente (imagen opaca: se imprime parejo)
+  var ACLARADOS = {};
+  function aclararFondo(img, a) {
+    a = Number(a) || 0; if (!a) return Promise.resolve(img);
+    var key = img.alias + '_' + a;
+    if (!ACLARADOS[key]) ACLARADOS[key] = new Promise(function (res) {
+      var el = new Image();
+      el.onload = function () {
+        var c = document.createElement('canvas'); c.width = img.w; c.height = img.h;
+        var g = c.getContext('2d'); g.drawImage(el, 0, 0, c.width, c.height);
+        g.fillStyle = 'rgba(255,255,255,' + a + ')'; g.fillRect(0, 0, c.width, c.height);
+        res(Object.assign({}, img, { data: c.toDataURL('image/jpeg', 0.9), alias: key.replace(/\./g, '_') }));
+      };
+      el.onerror = function () { res(img); };
+      el.src = img.data;
+    });
+    return ACLARADOS[key];
+  }
+  // Modelo listo para dibujar: con su fondo (aclarado si corresponde). cambios: ajustes aún no guardados (editor)
+  function modeloListo(m, cambios) {
+    var mm = Object.assign({}, m, cambios || {});
+    return fondoDe(m.id).then(function (f) { return aclararFondo(f, mm.aclarar); }).then(function (f) { return Object.assign(mm, { fondo: f }); });
+  }
   // Modelos que usan estos documentos (r.modeloId), con su fondo listo. Los eliminados se omiten (diseño del sistema).
   function modelosPara(records) {
     var ids = {}; records.forEach(function (r) { if (r.modeloId) ids[r.modeloId] = 1; });
     var lista = Object.keys(ids).map(function (id) { return S.modelos.filter(function (m) { return m.id === id; })[0]; }).filter(Boolean);
     if (!lista.length) return Promise.resolve({});
     busy(true, 'Preparando el modelo…');
-    return Promise.all(lista.map(function (m) { return fondoDe(m.id).then(function (f) { return Object.assign({}, m, { fondo: f }); }); }))
+    return Promise.all(lista.map(function (m) { return modeloListo(m); }))
       .then(function (ms) { busy(false); var o = {}; ms.forEach(function (m) { o[m.id] = m; }); return o; },
         function (e) { busy(false); toast('No se pudo cargar el modelo: ' + e.message + '. Se usará el diseño del sistema.', true); return {}; });
   }
@@ -1212,8 +1294,14 @@
       .catch(function (e) { if (w) w.close(); toast(e.message, true); });
   }
 
-  /* ---- Administrador: subir modelos y ubicar sus campos ---- */
+  /* ---- Administrador: subir modelos y ajustarlos ----
+     Dos tipos de modelo:
+       · 'campos': el PDF ya trae sus textos; se ubican solo los datos (nombre, fecha…). Cada dato puede llevar
+                   "fondo blanco detrás" para que no se mezcle con líneas o letras del diseño.
+       · 'fondo':  el PDF es solo un marco; el texto del sistema se dibuja reducido dentro de la "zona del texto".
+     En ambos se puede "aclarar el diseño" para que los datos resalten. */
   var TIPO_TXT = { licencia: 'Licencia', diploma: 'Diploma' };
+  var ZONA_DEF = { x: 0.08, y: 0.1, w: 0.84, h: 0.8 };
   // Ubicación inicial razonable de los datos (el administrador la ajusta arrastrando)
   var CAMPOS_INICIALES = {
     diploma: [{ k: 'nombre', x: .5, y: .5, s: 36, f: 'script' }, { k: 'curso', x: .5, y: .58, s: 12, f: 'serif', st: 'bold' },
@@ -1223,19 +1311,19 @@
       { k: 'run', x: .5, y: .64, s: 14, f: 'serif', st: 'bold' }, { k: 'lugarFecha', x: .29, y: .85, s: 12, f: 'serif', st: 'italic', w: .32 },
       { k: 'directora', x: .71, y: .85, s: 12, f: 'serif', st: 'bold', w: .32 }]
   };
-  function campoNuevo(k, i) { return { k: k, x: .5, y: Math.min(.9, .3 + i * .06), s: 14, f: 'serif', st: 'normal', c: '#081e48', a: 'center', w: .8 }; }
-  function completarCampo(c) { return Object.assign({ st: 'normal', c: '#081e48', a: 'center', w: .8 }, c); }
+  function campoNuevo(k, i) { return { k: k, x: .5, y: Math.min(.9, .3 + i * .06), s: 14, f: 'serif', st: 'normal', c: '#081e48', a: 'center', w: .8, bg: false }; }
+  function completarCampo(c) { return Object.assign({ st: 'normal', c: '#081e48', a: 'center', w: .8, bg: false }, c); }
 
   function renderModelos() {
     $('#modCount').textContent = S.modelos.length ? '· ' + S.modelos.length : '';
     $('#modList').innerHTML = S.modelos.length ? S.modelos.map(function (m) {
       return '<div class="mod-item" data-id="' + esc(m.id) + '"><div class="mod-thumb"><img alt="" data-thumb="' + esc(m.id) + '"></div><div class="mod-info">' +
         '<b>' + esc(m.nombre) + '</b><span><span class="chip curso">' + TIPO_TXT[m.tipo] + '</span> ' +
-        (m.modo === 'campos' ? m.campos.length + ' campos ubicados' : 'Marco/fondo con textos del sistema') + ' · ' + (m.orient === 'portrait' ? 'vertical' : 'horizontal') + '</span>' +
-        '<div class="mod-acts">' + (m.modo === 'campos' ? '<button class="link" data-act="campos">Ubicar campos</button>' : '') +
+        (m.modo === 'campos' ? m.campos.length + ' datos ubicados' : 'Marco con textos del sistema') + ' · ' + (m.orient === 'portrait' ? 'vertical' : 'horizontal') +
+        (m.aclarar ? ' · aclarado ' + Math.round(m.aclarar * 100) + '%' : '') + '</span>' +
+        '<div class="mod-acts"><button class="link" data-act="ajustar">Ajustar</button>' +
         '<button class="link" data-act="prev">Vista previa</button><button class="link" data-act="ren">Renombrar</button><button class="link danger" data-act="del">Eliminar</button></div></div></div>';
     }).join('') : '<p class="empty">Aún no hay modelos. Suba el primero con el formulario.</p>';
-    // miniaturas (se dibujan del PDF guardado)
     S.modelos.forEach(function (m) {
       fondoDe(m.id).then(function (f) { var im = $('img[data-thumb="' + m.id + '"]'); if (im) im.src = f.data; }).catch(function () {});
     });
@@ -1250,12 +1338,11 @@
         colegio: c.colegio || window.COLEGIO_NOMBRE || '', rbd: c.rbd || '4531', region: c.region || 'Biobío', provincia: c.provincia || 'Concepción', comuna: c.comuna || 'Concepción',
         anioEscolar: S.anio, directora: c.directora || 'Nombre de la Directora', cargo: c.cargo, ciudad: c.ciudad || 'Concepción', fecha: c.fecha || hoyISO() };
   }
-  function vistaModelo(m, campos) {
-    abrirDoc(fondoDe(m.id).then(function (f) {
-      var mod = Object.assign({}, m, { fondo: f, campos: campos || m.campos }), rec = muestra(m.tipo);
-      return (m.tipo === 'diploma' ? Licencia.buildDiplomas : Licencia.build)([rec], S.assets, Object.assign(printOpts(), { modelo: mod }));
-    }));
+  function construirMuestra(mod) {
+    var rec = muestra(mod.tipo);
+    return (mod.tipo === 'diploma' ? Licencia.buildDiplomas : Licencia.build)([rec], S.assets, Object.assign(printOpts(), { modelo: mod }));
   }
+  function vistaModelo(m, cambios) { abrirDoc(modeloListo(m, cambios).then(construirMuestra)); }
   function leerDataUrl(file) {
     return new Promise(function (res, rej) { var fr = new FileReader(); fr.onload = function () { res(fr.result); }; fr.onerror = rej; fr.readAsDataURL(file); });
   }
@@ -1274,23 +1361,24 @@
       return pdfAImagen(buf, 2600);
     }).then(function (im) {
       img = im;
-      if (modo === 'fondo' && img.orient === 'portrait') { modo = 'campos'; toast('El PDF es vertical: se usará "ubicar campos"', true); }
+      if (modo === 'fondo' && img.orient === 'portrait') { modo = 'campos'; toast('El PDF es vertical: se usará "ubicar datos"', true); }
       return leerDataUrl(file);
     }).then(function (dataUrl) {
       busy(true, 'Guardando el modelo en Drive…');
       return api('subirModelo', { tipo: f.tipo.value, nombre: f.nombre.value.trim(), modo: modo, orient: img.orient, logos: f.logos.checked,
-        campos: modo === 'campos' ? CAMPOS_INICIALES[f.tipo.value].map(completarCampo) : [], dataUrl: dataUrl.replace(/^data:[^;]*;/, 'data:application/pdf;') });
+        campos: CAMPOS_INICIALES[f.tipo.value].map(completarCampo), zona: ZONA_DEF, aclarar: 0,
+        dataUrl: dataUrl.replace(/^data:[^;]*;/, 'data:application/pdf;') });
     }).then(function (m) {
       img.alias = 'fondo' + m.id; FONDOS[m.id] = Promise.resolve(img);
       S.modelos.push(m); renderModeloSelects(); renderModelos(); f.reset(); $('#modLogosWrap').classList.add('hidden');
-      busy(false); toast('Modelo "' + m.nombre + '" guardado');
-      if (m.modo === 'campos') abrirEditor(m);
+      busy(false); toast('Modelo "' + m.nombre + '" guardado. Ahora ajústelo para que todo se lea bien.');
+      abrirEditor(m);
     }).catch(function (err) { busy(false); toast(err.message || 'No se pudo leer el PDF', true); });
   });
   $('#modList').addEventListener('click', function (e) {
     var b = e.target.closest('button[data-act]'); if (!b) return;
     var m = S.modelos.filter(function (x) { return x.id === b.closest('.mod-item').dataset.id; })[0];
-    if (b.dataset.act === 'campos') abrirEditor(m);
+    if (b.dataset.act === 'ajustar') abrirEditor(m);
     else if (b.dataset.act === 'prev') vistaModelo(m);
     else if (b.dataset.act === 'ren') formDlg('Renombrar modelo', [{ name: 'nombre', label: 'Nombre', value: m.nombre, required: true }]).then(function (v) {
       if (v) api('guardarModelo', { id: m.id, nombre: v.nombre }).then(function (l) { S.modelos = l; renderModeloSelects(); renderModelos(); }).catch(function (err) { toast(err.message, true); });
@@ -1301,7 +1389,7 @@
     });
   });
 
-  /* Editor: los datos se arrastran sobre el diseño. x, y = fracción de la hoja (centro vertical del texto). */
+  /* ---- Editor del modelo ---- */
   var ED = null;
   var LETRAS = [['serif|normal', 'Serif'], ['serif|bold', 'Serif negrita'], ['serif|italic', 'Serif cursiva'], ['script|normal', 'Caligráfica'], ['title|bold', 'Título decorativo']];
   var FAMILIA = { serif: "'Crimson Text', Georgia, serif", script: "'Great Vibes', cursive", title: "'Cinzel Decorative', Georgia, serif" };
@@ -1309,40 +1397,96 @@
     busy(true, 'Abriendo el diseño…');
     fondoDe(m.id).then(function (img) {
       busy(false);
-      ED = { m: m, campos: (m.campos || []).map(completarCampo), sel: null, rec: muestra(m.tipo) };
+      ED = { m: m, modo: m.modo, aclarar: Number(m.aclarar) || 0, logos: !!m.logos, zona: Object.assign({}, ZONA_DEF, m.zona || {}),
+        campos: (m.campos && m.campos.length ? m.campos : CAMPOS_INICIALES[m.tipo]).map(completarCampo), sel: null, rec: muestra(m.tipo), overlay: null };
       var pg = m.orient === 'portrait' ? [Licencia.PAGINA.H, Licencia.PAGINA.W] : [Licencia.PAGINA.W, Licencia.PAGINA.H];
       $('#mdPage').style.aspectRatio = pg[0] + ' / ' + pg[1]; ED.pgW = pg[0];
       $('#mdImg').src = img.data;
-      $('#mdTitulo').textContent = 'Ubicar campos · ' + m.nombre;
+      $('#mdTitulo').textContent = 'Ajustar modelo · ' + m.nombre;
       ED.sel = ED.campos[0] ? ED.campos[0].k : null;
       $('#modDlg').showModal();
       requestAnimationFrame(function () { renderEditor(); });
     }).catch(function (e) { busy(false); toast('No se pudo abrir el modelo: ' + e.message, true); });
   }
   function campoSel() { return ED.campos.filter(function (c) { return c.k === ED.sel; })[0]; }
+  // Imagen transparente con el texto del sistema (para ver cómo queda dentro de la zona, en modo 'fondo')
+  function overlaySistema() {
+    if (ED.overlay) return ED.overlay;
+    var mod = { tipo: ED.m.tipo, modo: 'fondo', orient: 'landscape', logos: ED.logos, zona: { x: 0, y: 0, w: 1, h: 1 }, fondo: null };
+    var doc = construirMuestra(mod);
+    ED.overlay = loadPdfJs().then(function () { return pdfjsLib.getDocument({ data: new Uint8Array(doc.output('arraybuffer')) }).promise; })
+      .then(function (pdf) { return pdf.getPage(1); }).then(function (page) {
+        var vp = page.getViewport({ scale: 1400 / page.getViewport({ scale: 1 }).width });
+        var c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
+        return page.render({ canvasContext: c.getContext('2d'), viewport: vp, background: 'rgba(0,0,0,0)' }).promise.then(function () { return c.toDataURL('image/png'); });
+      });
+    return ED.overlay;
+  }
+  function solapados() {
+    var cajas = $$('.md-f').map(function (n) { return { k: n.dataset.k, r: n.getBoundingClientRect() }; }), mal = {};
+    cajas.forEach(function (a, i) {
+      cajas.slice(i + 1).forEach(function (b) {
+        if (a.r.left < b.r.right - 2 && b.r.left < a.r.right - 2 && a.r.top < b.r.bottom - 2 && b.r.top < a.r.bottom - 2) { mal[a.k] = 1; mal[b.k] = 1; }
+      });
+    });
+    return mal;
+  }
   function renderEditor(soloPagina) {
     if (!ED) return;
-    var page = $('#mdPage'), pxMm = page.clientWidth / ED.pgW;
-    $$('.md-f', page).forEach(function (n) { n.remove(); });
-    ED.campos.forEach(function (c) {
-      var d = document.createElement('div');
-      d.className = 'md-f' + (c.k === ED.sel ? ' on' : ''); d.dataset.k = c.k; d.tabIndex = 0;
-      d.textContent = Licencia.valorCampo(ED.rec, c.k) || '[' + c.k + ']';
-      d.style.left = (c.x * 100) + '%'; d.style.top = (c.y * 100) + '%';
-      d.style.transform = 'translate(' + (c.a === 'left' ? '0' : c.a === 'right' ? '-100%' : '-50%') + ',-50%)';
-      d.style.fontFamily = FAMILIA[c.f] || FAMILIA.serif;
-      d.style.fontWeight = c.st === 'bold' || c.f === 'title' ? '700' : '400';
-      d.style.fontStyle = c.st === 'italic' ? 'italic' : 'normal';
-      d.style.fontSize = (c.s * 0.3528 * pxMm) + 'px';
-      d.style.color = c.c; d.style.maxWidth = (c.w * 100) + '%';
-      page.appendChild(d);
-    });
+    var page = $('#mdPage'), pxMm = page.clientWidth / ED.pgW, fondo = ED.modo === 'fondo';
+    $('#mdImg').style.opacity = String(1 - ED.aclarar);
+    $$('.md-f, .md-zona', page).forEach(function (n) { n.remove(); });
+    if (fondo) {
+      var z = ED.zona, zd = document.createElement('div');
+      zd.className = 'md-zona';
+      zd.style.left = (z.x * 100) + '%'; zd.style.top = (z.y * 100) + '%'; zd.style.width = (z.w * 100) + '%'; zd.style.height = (z.h * 100) + '%';
+      zd.innerHTML = '<img alt=""><span>Zona del texto</span>';
+      page.appendChild(zd);
+      overlaySistema().then(function (u) { var i = $('.md-zona img'); if (i) i.src = u; });
+    } else {
+      ED.campos.forEach(function (c) {
+        var d = document.createElement('div');
+        d.className = 'md-f' + (c.k === ED.sel ? ' on' : '') + (c.bg ? ' bg' : ''); d.dataset.k = c.k; d.tabIndex = 0;
+        d.textContent = Licencia.valorCampo(ED.rec, c.k) || '[' + c.k + ']';
+        d.style.left = (c.x * 100) + '%'; d.style.top = (c.y * 100) + '%';
+        d.style.transform = 'translate(' + (c.a === 'left' ? '0' : c.a === 'right' ? '-100%' : '-50%') + ',-50%)';
+        d.style.fontFamily = FAMILIA[c.f] || FAMILIA.serif;
+        d.style.fontWeight = c.st === 'bold' || c.f === 'title' ? '700' : '400';
+        d.style.fontStyle = c.st === 'italic' ? 'italic' : 'normal';
+        d.style.fontSize = (c.s * 0.3528 * pxMm) + 'px';
+        d.style.color = c.c; d.style.maxWidth = (c.w * 100) + '%';
+        page.appendChild(d);
+      });
+      var mal = solapados();
+      $$('.md-f', page).forEach(function (n) { n.classList.toggle('choca', !!mal[n.dataset.k]); });
+      var aviso = $('#mdAviso'); if (aviso) aviso.classList.toggle('hidden', !Object.keys(mal).length);
+    }
     if (soloPagina) return;
+    var vertical = ED.m.orient === 'portrait';
+    var cab = '<div class="md-modo"><b>¿Qué trae el PDF?</b>' +
+      '<label class="check"><input type="radio" name="mdModo" value="campos"' + (fondo ? '' : ' checked') + '> El diseño completo: ubico solo los datos</label>' +
+      '<label class="check' + (vertical ? ' muted' : '') + '"><input type="radio" name="mdModo" value="fondo"' + (fondo ? ' checked' : '') + (vertical ? ' disabled' : '') + '> Solo el marco: la página escribe todo el texto</label></div>' +
+      '<label>Aclarar el diseño de fondo: <b id="mdAclVal">' + Math.round(ED.aclarar * 100) + '%</b> <small class="muted">(hace que los datos resalten)</small>' +
+      '<input type="range" data-g="aclarar" min="0" max="70" step="5" value="' + Math.round(ED.aclarar * 100) + '"></label>';
+    if (fondo) {
+      var z = ED.zona, pct = function (v) { return Math.round(v * 100); };
+      $('#mdCampos').innerHTML = cab +
+        '<p class="muted small">Ajuste la <b>zona del texto</b> para que quede dentro del marco, sin tocar sus adornos. El texto se achica para caber.</p>' +
+        '<label>Margen izquierdo: <b>' + pct(z.x) + '%</b><input type="range" data-z="izq" min="0" max="35" value="' + pct(z.x) + '"></label>' +
+        '<label>Margen derecho: <b>' + pct(1 - z.x - z.w) + '%</b><input type="range" data-z="der" min="0" max="35" value="' + pct(1 - z.x - z.w) + '"></label>' +
+        '<label>Margen superior: <b>' + pct(z.y) + '%</b><input type="range" data-z="sup" min="0" max="35" value="' + pct(z.y) + '"></label>' +
+        '<label>Margen inferior: <b>' + pct(1 - z.y - z.h) + '%</b><input type="range" data-z="inf" min="0" max="35" value="' + pct(1 - z.y - z.h) + '"></label>' +
+        '<label class="check"><input type="checkbox" data-g="logos"' + (ED.logos ? ' checked' : '') + '> Incluir escudo de Chile e insignia del colegio</label>';
+      $('#mdProps').innerHTML = '';
+      return;
+    }
     var lista = Licencia.CAMPOS[ED.m.tipo];
-    $('#mdCampos').innerHTML = lista.map(function (x) {
-      var on = ED.campos.some(function (c) { return c.k === x[0]; });
-      return '<label class="check' + (x[0] === ED.sel ? ' sel' : '') + '"><input type="checkbox" data-k="' + x[0] + '"' + (on ? ' checked' : '') + '> ' + esc(x[1]) + '</label>';
-    }).join('');
+    $('#mdCampos').innerHTML = cab + '<p class="inv-err small hidden" id="mdAviso">Hay datos encimados (marcados en rojo). Sepárelos o achíquelos para que se lean bien.</p>' +
+      '<div class="md-lista">' + lista.map(function (x) {
+        var on = ED.campos.some(function (c) { return c.k === x[0]; });
+        return '<label class="check' + (x[0] === ED.sel ? ' sel' : '') + '"><input type="checkbox" data-k="' + x[0] + '"' + (on ? ' checked' : '') + '> ' + esc(x[1]) + '</label>';
+      }).join('') + '</div>';
+    var mal = solapados(); $('#mdAviso').classList.toggle('hidden', !Object.keys(mal).length);
     var c = campoSel();
     $('#mdProps').innerHTML = !c ? '<p class="muted small">Seleccione un dato en el diseño para cambiar su tamaño, letra y color.</p>' :
       '<h4>' + esc((lista.filter(function (x) { return x[0] === c.k; })[0] || [0, c.k])[1]) + '</h4>' +
@@ -1353,18 +1497,33 @@
         return '<option value="' + l[0] + '"' + (l[0] === c.f + '|' + (c.f === 'script' ? 'normal' : c.f === 'title' ? 'bold' : c.st) ? ' selected' : '') + '>' + l[1] + '</option>'; }).join('') + '</select></label>' +
       '<label class="span2">Alineación<select data-p="a"><option value="left"' + (c.a === 'left' ? ' selected' : '') + '>Desde la izquierda</option><option value="center"' + (c.a === 'center' ? ' selected' : '') + '>Centrado</option><option value="right"' + (c.a === 'right' ? ' selected' : '') + '>Hasta la derecha</option></select></label>' +
       '<label class="span2">Ancho máximo: <b>' + Math.round(c.w * 100) + '%</b> de la hoja <small class="muted">(si el texto es más largo, se achica)</small><input type="range" data-p="w" min="10" max="100" value="' + Math.round(c.w * 100) + '"></label>' +
+      '<label class="check span2"><input type="checkbox" data-p="bg"' + (c.bg ? ' checked' : '') + '> Fondo blanco detrás <small class="muted">(tapa líneas o letras del diseño que queden debajo)</small></label>' +
       '</div><p class="muted small">Posición: ' + Math.round(c.x * 1000) / 10 + '% · ' + Math.round(c.y * 1000) / 10 + '%</p>';
   }
   $('#mdCampos').addEventListener('change', function (e) {
-    var k = e.target.dataset.k; if (!k) return;
-    if (e.target.checked) { ED.campos.push(campoNuevo(k, ED.campos.length)); ED.sel = k; }
+    var t = e.target;
+    if (t.name === 'mdModo') { ED.modo = t.value; return renderEditor(); }
+    if (t.dataset.g === 'logos') { ED.logos = t.checked; ED.overlay = null; return renderEditor(); }
+    var k = t.dataset.k; if (!k) return;
+    if (t.checked) { ED.campos.push(campoNuevo(k, ED.campos.length)); ED.sel = k; }
     else { ED.campos = ED.campos.filter(function (c) { return c.k !== k; }); if (ED.sel === k) ED.sel = ED.campos[0] ? ED.campos[0].k : null; }
     renderEditor();
+  });
+  $('#mdCampos').addEventListener('input', function (e) {
+    var t = e.target, v = Number(t.value) / 100;
+    if (t.dataset.g === 'aclarar') { ED.aclarar = v; $('#mdAclVal').textContent = t.value + '%'; return renderEditor(true); }
+    var zz = t.dataset.z; if (!zz) return;
+    var z = ED.zona, der = 1 - z.x - z.w, inf = 1 - z.y - z.h;
+    if (zz === 'izq') z.x = v; if (zz === 'der') der = v; if (zz === 'sup') z.y = v; if (zz === 'inf') inf = v;
+    z.w = Math.max(0.2, 1 - z.x - der); z.h = Math.max(0.2, 1 - z.y - inf);
+    var lb = t.closest('label').querySelector('b'); if (lb) lb.textContent = t.value + '%';
+    renderEditor(true);
   });
   $('#mdProps').addEventListener('input', function (e) {
     var c = campoSel(), p = e.target.dataset.p; if (!c || !p) return;
     if (p === 's') c.s = Math.max(5, Math.min(72, Number(e.target.value) || c.s));
     else if (p === 'w') c.w = Number(e.target.value) / 100;
+    else if (p === 'bg') c.bg = e.target.checked;
     else if (p === 'letra') { var v = e.target.value.split('|'); c.f = v[0]; c.st = v[1]; }
     else c[p] = e.target.value;
     renderEditor(true);
@@ -1378,7 +1537,7 @@
       e.preventDefault();
       ED.sel = d.dataset.k; var c = campoSel(), r = $('#mdPage').getBoundingClientRect();
       drag = { c: c, r: r, dx: e.clientX - (r.left + c.x * r.width), dy: e.clientY - (r.top + c.y * r.height) };
-      d.setPointerCapture(e.pointerId);
+      try { d.setPointerCapture(e.pointerId); } catch (err) {}
       $$('.md-f').forEach(function (n) { n.classList.toggle('on', n === d); });
     });
     $('#mdPage').addEventListener('pointermove', function (e) {
@@ -1398,14 +1557,16 @@
     });
   })();
   window.addEventListener('resize', function () { if ($('#modDlg').open) renderEditor(); });
+  function cambiosEditor() { return { modo: ED.modo, campos: ED.campos, zona: ED.zona, aclarar: ED.aclarar, logos: ED.logos }; }
   $('#mdCancel').addEventListener('click', function () { $('#modDlg').close(); ED = null; });
-  $('#mdPrev').addEventListener('click', function () { if (ED) vistaModelo(ED.m, ED.campos); });
+  $('#mdPrev').addEventListener('click', function () { if (ED) vistaModelo(ED.m, cambiosEditor()); });
   $('#mdSave').addEventListener('click', function () {
     if (!ED) return;
-    if (!ED.campos.some(function (c) { return c.k === 'nombre'; }) && !window.confirm('El modelo no tiene el nombre del estudiante. ¿Guardar de todas formas?')) return;
+    if (ED.modo === 'campos' && !ED.campos.some(function (c) { return c.k === 'nombre'; }) && !window.confirm('El modelo no tiene el nombre del estudiante. ¿Guardar de todas formas?')) return;
+    if (ED.modo === 'campos' && Object.keys(solapados()).length && !window.confirm('Hay datos encimados que podrían no leerse bien. ¿Guardar de todas formas?')) return;
     busy(true, 'Guardando…');
-    api('guardarModelo', { id: ED.m.id, campos: ED.campos }).then(function (l) {
-      S.modelos = l; renderModeloSelects(); renderModelos(); $('#modDlg').close(); ED = null; toast('Ubicación de los campos guardada');
+    api('guardarModelo', Object.assign({ id: ED.m.id }, cambiosEditor())).then(function (l) {
+      S.modelos = l; renderModeloSelects(); renderModelos(); $('#modDlg').close(); ED = null; toast('Modelo guardado');
     }).catch(function (e) { toast(e.message, true); }).then(function () { busy(false); });
   });
 
@@ -2089,10 +2250,11 @@
 
   /* ---------------- inicio ---------------- */
   (function portada() {
-    var def = window.LICENCIA_ASSETS || {};
-    $('#heroLogo').src = def.colegio || '';
-    $('#brandLogo').src = def.colegio || '';
+    // se muestra al tiro el último logo conocido (guardado en este equipo) y luego se confirma con el servidor
+    var guardado = ''; try { guardado = localStorage.getItem('lic_portada_logo') || ''; } catch (e) {}
     $('#heroSchool').textContent = window.COLEGIO_NOMBRE || 'Generador de Licencias';
+    aplicarPortada(guardado);
+    api('portada').then(function (p) { aplicarPortada(p.logo); }).catch(function () {});
   })();
   if (DEMO) $('#demoNote').classList.remove('hidden');
   if (S.token) {

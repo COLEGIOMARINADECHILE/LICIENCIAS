@@ -117,7 +117,7 @@
       return { agregados: add, omitidos: om, lista: listStud(d, q) };
     }
     var A = {
-      listUsers: function (d) { return d.users.filter(function (u) { return u.activo; }).map(function (u) { return { id: u.id, nombre: u.nombre }; }); },
+      listUsers: function (d) { return d.users.filter(function (u) { return u.activo && u.conClave !== false; }).map(function (u) { return { id: u.id, nombre: u.nombre }; }); },
       login: function (d, q) {
         var u = d.users.filter(function (x) { return x.id === q.userId && x.activo; })[0];
         if (!u || !q.password || (u.clave && q.password !== u.clave)) throw new Error('Usuario o clave incorrectos');
@@ -218,6 +218,32 @@
         return { lista: d.users, id: u.id, email: u.email, clave: clave };
       },
       enviarInvitacion: function () { return { enviado: false }; },
+      // demo: simula Google con el correo escrito (en producción lo valida Google)
+      loginGoogle: function (d, q) {
+        var email = String(q.demoEmail || '').toLowerCase(), dom = '@' + (window.DOMINIO_CORREO || 'andaliensur.cl');
+        if (email.slice(-dom.length) !== dom) throw new Error('Use su cuenta institucional ' + dom + ' (ingresó con ' + email + ').');
+        var u = d.users.filter(function (x) { return String(x.email).toLowerCase() === email; })[0];
+        if (!u) throw new Error('El correo ' + email + ' no está autorizado. Pida al administrador que lo agregue a la lista.');
+        if (!u.activo) throw new Error('Su acceso está desactivado. Consulte al administrador.');
+        u.ultimoIngreso = new Date().toISOString();
+        var t = id('t-'); d.tokens[t] = u.id;
+        return { token: t, user: Object.assign({}, u, { cambiarClave: false }) };
+      },
+      autorizarCorreos: function (d, q) {
+        var dom = '@' + (window.DOMINIO_CORREO || 'andaliensur.cl'), add = 0, om = [], inv = [];
+        String(q.texto || '').split(/\r?\n|;/).forEach(function (l) {
+          l = l.trim(); if (!l) return;
+          var p = l.split(/[,\t]/), partes = p.length === 2 && /\s/.test(p[1].trim()) && p[1].indexOf('@') < 0 ? [[p[0], p[1].trim()]]
+            : l.split(/[\s,]+/).filter(Boolean).map(function (e) { return [e, '']; });
+          partes.forEach(function (x) {
+            var e = x[0].trim().toLowerCase(); if (e.indexOf('@') < 0) e += dom;
+            if (e.slice(-dom.length) !== dom || !/^[^\s@]+@/.test(e)) return inv.push(x[0]);
+            if (d.users.some(function (u) { return u.email === e; })) return om.push(e);
+            d.users.push({ id: id('u-'), nombre: x[1] || e.split('@')[0], email: e, rol: q.rol, activo: true, conClave: false }); add++;
+          });
+        });
+        return { lista: d.users, agregados: add, omitidos: om, invalidos: inv };
+      },
       solicitarCodigo: function (d, q) {
         var u = d.users.filter(function (x) { return x.id === q.userId; })[0];
         if (!u) throw new Error('Seleccione su nombre');
@@ -240,7 +266,7 @@
             var d = load();
             try {
               var u = null;
-              if (['listUsers', 'login', 'solicitarCodigo', 'restablecerClave'].indexOf(q.action) < 0) {
+              if (['listUsers', 'login', 'loginGoogle', 'solicitarCodigo', 'restablecerClave'].indexOf(q.action) < 0) {
                 var uid = d.tokens[q.token]; u = d.users.filter(function (x) { return x.id === uid; })[0];
                 if (!u) throw new Error('SESION_EXPIRADA');
               }
@@ -346,6 +372,48 @@
     });
   }
 
+  /* ---- Ingreso con Google (cuentas @andaliensur.cl autorizadas por el administrador) ----
+     Google muestra su propia pantalla de ingreso; la página solo recibe un comprobante firmado (ID token)
+     que Apps Script valida con Google. La clave del correo nunca pasa por esta página. */
+  var GID = window.GOOGLE_CLIENT_ID || '';
+  function ingresoGoogle(datos) {
+    busy(true, 'Verificando su cuenta…');
+    $('#loginError').textContent = '';
+    return api('loginGoogle', datos).then(function (r) {
+      S.token = r.token; ss('set', 'lic_token', r.token);
+      return startApp(r.user);
+    }).catch(function (e) { $('#loginError').textContent = e.message; }).then(function () { busy(false); });
+  }
+  function mostrarClave(on) {
+    $('#claveWrap').classList.toggle('hidden', !on);
+    $('#btnUsarClave').textContent = on ? 'Ocultar ingreso con usuario y clave ▴' : 'Ingresar con usuario y clave de esta página ▾';
+  }
+  (function initGoogle() {
+    if (!GID && !DEMO) return; // sin configurar: solo usuario y clave
+    $('#gWrap').classList.remove('hidden'); mostrarClave(false);
+    $('#btnUsarClave').addEventListener('click', function () { mostrarClave($('#claveWrap').classList.contains('hidden')); });
+    if (!GID) { // modo demostración: simula el ingreso con Google pidiendo el correo
+      $('#btnGoogleDemo').classList.remove('hidden');
+      $('#btnGoogleDemo').addEventListener('click', function () {
+        formDlg('Ingresar con Google (demostración)', [{ name: 'email', label: 'Correo institucional', value: '', required: true }]).then(function (v) {
+          if (v) ingresoGoogle({ demoEmail: correoCompleto(v.email) });
+        });
+      });
+      return;
+    }
+    var s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client'; s.async = true;
+    s.onload = function () {
+      google.accounts.id.initialize({
+        client_id: GID, hd: DOMINIO, auto_select: false, cancel_on_tap_outside: true, ux_mode: 'popup',
+        callback: function (resp) { ingresoGoogle({ credential: resp.credential }); }
+      });
+      google.accounts.id.renderButton($('#gBtn'), { theme: 'filled_blue', size: 'large', shape: 'pill', text: 'signin_with', locale: 'es', width: 300 });
+    };
+    s.onerror = function () { $('#gBtn').innerHTML = '<p class="error">No se pudo cargar el ingreso con Google. Revise su conexión.</p>'; mostrarClave(true); };
+    document.head.appendChild(s);
+  })();
+
   /* ---- Primer ingreso con clave provisoria: obliga a crear la clave personal ---- */
   function crearClavePersonal(provisoria, msg) {
     var campos = (provisoria ? [] : [{ name: 'actual', label: 'Clave provisoria (la del correo)', type: 'password', required: true }]).concat([
@@ -364,6 +432,7 @@
   function logoutLocal() {
     S.token = null; ss('del', 'lic_token');
     document.body.classList.remove('modo-dip', 'en-inicio');
+    try { if (window.google && google.accounts) google.accounts.id.disableAutoSelect(); } catch (e) {}
     $('#app').classList.add('hidden'); $('#login').classList.remove('hidden');
     loadUsers();
   }
@@ -1362,10 +1431,13 @@
       var me = u.id === S.user.id;
       return '<tr data-id="' + esc(u.id) + '"><td class="name">' + avatarHtml(u.nombre, 'sm') + esc(u.nombre) + (me ? ' <span class="chip pend">usted</span>' : '') + '</td><td>' +
         (u.email ? esc(u.email) : '<span class="chip warn">sin correo</span>') + '</td><td>' +
+        (u.conClave === false ? '<span class="chip g-chip">Google</span>' : '<span class="chip pend">Clave</span>' + (/@/.test(u.email || '') ? ' <span class="chip g-chip">Google</span>' : '')) + '</td><td>' +
         (u.rol === 'admin' ? 'Administrador' : 'Usuario') + '</td><td>' +
-        (!u.activo ? '<span class="chip pend">Inactivo</span>' : u.cambiarClave ? '<span class="chip warn" title="Aún no crea su clave personal">Invitación pendiente</span>' : '<span class="chip ok">Activo</span>') +
+        (!u.activo ? '<span class="chip pend">Inactivo</span>'
+          : u.conClave === false ? (u.ultimoIngreso ? '<span class="chip ok" title="Último ingreso">Ingresó ' + esc(fmtDate(u.ultimoIngreso).split(' ')[0]) + '</span>' : '<span class="chip warn">Autorizado · aún no ingresa</span>')
+          : u.cambiarClave ? '<span class="chip warn" title="Aún no crea su clave personal">Invitación pendiente</span>' : '<span class="chip ok">Activo</span>') +
         '</td><td class="actions"><button class="link" data-act="edit">Editar</button>' +
-        (me ? '' : '<button class="link" data-act="inv" title="Genera una nueva clave provisoria y la envía a su correo">Enviar clave provisoria</button>' +
+        (me ? '' : (u.conClave === false ? '' : '<button class="link" data-act="inv" title="Genera una nueva clave provisoria y la envía a su correo">Enviar clave provisoria</button>') +
           '<button class="link" data-act="toggle">' + (u.activo ? 'Desactivar' : 'Activar') + '</button><button class="link danger" data-act="del">Eliminar</button>') + '</td></tr>';
     }).join('');
   }
@@ -1377,6 +1449,27 @@
   $('#userForm').elements.email.addEventListener('input', function () {
     var i = this.value.indexOf('@'); if (i >= 0 && this.value.slice(i + 1).toLowerCase() === DOMINIO) this.value = this.value.slice(0, i);
   });
+
+  /* Autorizar una lista de correos para ingresar con Google */
+  $('#autForm').addEventListener('submit', function (e) {
+    e.preventDefault(); var f = e.target;
+    busy(true, 'Autorizando…');
+    api('autorizarCorreos', { texto: f.texto.value, rol: f.rol.value }).then(function (r) {
+      renderUsers(r.lista); busy(false);
+      if (!r.invalidos.length) f.texto.value = '';
+      else f.texto.value = r.invalidos.join('\n'); // deja a la vista solo los que hay que corregir
+      openDlg('Funcionarios autorizados', '<p class="inv-ok">✓ ' + r.agregados + ' correo' + (r.agregados === 1 ? '' : 's') + ' autorizado' + (r.agregados === 1 ? '' : 's') + '.</p>' +
+        (r.omitidos.length ? '<p class="muted small">Ya estaban en la lista: ' + esc(r.omitidos.join(', ')) + '</p>' : '') +
+        (r.invalidos.length ? '<p class="inv-err">No se agregaron (deben ser @' + esc(DOMINIO) + '): <b>' + esc(r.invalidos.join(', ')) + '</b></p>' : '') +
+        '<p class="muted small">Ya pueden entrar con el botón <b>"Acceder con Google"</b> usando su correo y la clave de su correo.</p>');
+    }).catch(function (err) { toast(err.message, true); }).then(function () { busy(false); });
+  });
+  // Aviso para el administrador mientras el ingreso con Google no esté configurado
+  if (!GID) $('#gSetup').classList.remove('hidden');
+  if (!GID) $('#gSetup').innerHTML =
+    '<b>Falta un paso para activar el botón de Google</b> (se hace una vez): crear el "ID de cliente" en Google Cloud con el origen ' +
+    '<code>' + esc(location.origin) + '</code> y pegarlo en <code>config.js</code> y en <code>Code.gs</code>. Vea INSTRUCCIONES_GOOGLE.txt. ' +
+    'Mientras tanto puede ir armando la lista.';
 
   /* Invitación en 2 pasos: (1) se crea el usuario con clave automática; (2) se envía el correo.
      Si el correo falla, el usuario ya existe y el administrador ve la clave para entregarla en persona. */

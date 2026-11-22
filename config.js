@@ -10,6 +10,10 @@ window.COLEGIO_NOMBRE = 'Colegio Marina de Chile';
 /* Dominio del correo institucional: al crear un usuario solo se escribe lo que va antes de la @ */
 window.DOMINIO_CORREO = 'andaliensur.cl';
 
+/* Ingreso con Google: pegue aquí el "ID de cliente" de OAuth (termina en .apps.googleusercontent.com).
+   Debe ser el MISMO que GOOGLE_CLIENT_ID en Code.gs. Vacío = solo ingreso con usuario y clave. */
+window.GOOGLE_CLIENT_ID = '197883899587-30tmp2umaf7166b90qjnva7dc5eoa4fv.apps.googleusercontent.com';
+
 window.LICENCIA_ASSETS = {
   escudo: 'escudo-chile.png',   // Escudo de la República de Chile (centro) — FIJO, no se puede cambiar
   colegio: 'logo-70-anios.png', // Insignia por defecto (izquierda y marca de agua central)

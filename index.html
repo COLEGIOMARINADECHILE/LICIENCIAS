@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Cormorant+Garamond:ital,wght@1,600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=8">
+<link rel="stylesheet" href="styles.css?v=10">
 </head>
 <body>
 
@@ -25,6 +25,15 @@
   </div>
   <form class="login-card" id="loginForm" autocomplete="on">
     <h2>Bienvenido</h2>
+    <!-- Ingreso con la cuenta institucional de Google (se muestra cuando hay GOOGLE_CLIENT_ID en config.js) -->
+    <div class="g-wrap hidden" id="gWrap">
+      <p class="muted">Funcionarios: ingrese con su correo <b>@andaliensur.cl</b> y la clave de su correo.</p>
+      <div id="gBtn" class="g-btn"></div>
+      <button type="button" class="btn g-demo hidden" id="btnGoogleDemo"><span class="g-logo">G</span>Ingresar con Google (demostración)</button>
+      <p class="g-note">La clave se escribe en la pantalla de Google; esta página nunca la ve.</p>
+      <button type="button" class="link or-clave" id="btnUsarClave">Ingresar con usuario y clave de esta página ▾</button>
+    </div>
+    <div id="claveWrap">
     <p class="muted">¿Quién ingresa? Toque su nombre.</p>
     <input type="search" id="userSearch" class="user-search hidden" placeholder="Buscar su nombre…" aria-label="Buscar usuario">
     <div class="user-pick" id="userPick" role="radiogroup" aria-label="Usuarios"><p class="muted">Cargando…</p></div>
@@ -37,8 +46,9 @@
     </div>
     <button class="btn primary block" type="submit" id="btnIngresar" disabled>Ingresar</button>
     <button type="button" class="link forgot" id="btnOlvide">¿Olvidó su clave?</button>
+    </div>
     <p class="error" id="loginError"></p>
-    <p class="ver">Versión 8 · correo institucional</p>
+    <p class="ver">Versión 10 · ingreso con Google activado</p>
     <p class="demo-note hidden" id="demoNote">Modo demostración: los datos se guardan solo en este navegador y se acepta cualquier clave. Configure <code>config.js</code> para usar Apps Script.</p>
   </form>
 </section>
@@ -332,13 +342,30 @@
           <h3>Usuarios</h3>
           <div class="table-wrap">
             <table class="tbl" id="userTable">
-              <thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Estado</th><th></th></tr></thead>
+              <thead><tr><th>Nombre</th><th>Correo</th><th>Ingreso</th><th>Rol</th><th>Estado</th><th></th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
         </div>
-        <form class="card" id="userForm">
-          <h3>Nuevo usuario</h3>
+        <div class="user-side">
+        <form class="card" id="autForm">
+          <h3>Autorizar funcionarios <span class="chip g-chip">Google</span></h3>
+          <p class="muted">Ingresan con su cuenta <b>@andaliensur.cl</b> y la clave de su correo. Solo podrán entrar los correos de esta lista.</p>
+          <div class="g-setup hidden" id="gSetup"></div>
+          <label>Correos (uno por línea; basta lo que va antes de la @)
+            <textarea name="texto" rows="6" required placeholder="juan.perez&#10;maria.soto&#10;pedro.rojas, Pedro Rojas Muñoz"></textarea>
+          </label>
+          <div class="row mt-s">
+            <label class="inline">Rol <select name="rol" style="width:auto"><option value="usuario">Usuario</option><option value="admin">Administrador</option></select></label>
+            <span class="spacer"></span>
+            <button class="btn primary" type="submit">Autorizar</button>
+          </div>
+          <p class="muted small">El nombre se completa solo con el de su cuenta de Google la primera vez que ingresan. También puede pegar una columna de correos desde Excel.</p>
+        </form>
+        <details class="card more-user">
+        <summary>Usuario con clave propia de esta página (opcional)</summary>
+        <form id="userForm">
+          <h3>Nuevo usuario con clave</h3>
           <p class="muted">La página <b>crea la clave provisoria automáticamente</b> y la envía al correo junto con la dirección de esta página. Al ingresar por primera vez, el funcionario crea su clave personal.</p>
           <div class="form-grid">
             <label class="span2">Nombre completo<input name="nombre" required></label>
@@ -349,6 +376,8 @@
           </div>
           <div class="row end mt"><button class="btn primary" type="submit">Crear y enviar invitación</button></div>
         </form>
+        </details>
+        </div>
       </div>
     </div>
   </main>
@@ -371,8 +400,8 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="config.js?v=8"></script>
-<script src="licencia.js?v=8"></script>
-<script src="app.js?v=8"></script>
+<script src="config.js?v=10"></script>
+<script src="licencia.js?v=10"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>
